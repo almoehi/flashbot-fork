@@ -1,4 +1,4 @@
-addSbtCoursier
+//addSbtCoursier
 addSbtPlugin("com.47deg" % "sbt-microsites" % "0.7.24")
 addSbtPlugin("com.dwijnand" % "sbt-travisci" % "1.1.3")
 addSbtPlugin("com.eed3si9n" % "sbt-unidoc" % "0.4.2")
@@ -14,3 +14,5 @@ addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.5.1")
 addSbtPlugin("org.tpolecat" % "tut-plugin" % "0.6.10")
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.3.4")
 addSbtPlugin("org.foundweekends" % "sbt-bintray" % "0.5.4")
+addSbtPlugin("com.typesafe.sbt" % "sbt-native-packager" % "1.7.0")
+addSbtPlugin("org.vaslabs.kube" % "sbt-kubeyml" % "0.3.4")
