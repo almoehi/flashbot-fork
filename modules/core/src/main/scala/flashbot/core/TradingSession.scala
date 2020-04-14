@@ -213,13 +213,14 @@ class TradingSession(val strategyKey: String,
   protected[flashbot] def start(): Future[SessionSetup] = this.synchronized {
     assert(completeFut.isEmpty, "Session already started")
 
-    val ks = KillSwitches.shared(id.get)
+    lazy val ks = KillSwitches.shared(id.get)
 
     val sessionInitFuture = for {
       // Load all setup vals
       setup <- load
       _ = {
         strategy = setup.strategy
+        id = Some(setup.sessionId)
       }
 
       // Prepare market data streams
