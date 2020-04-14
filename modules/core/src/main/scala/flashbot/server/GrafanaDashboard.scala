@@ -235,8 +235,8 @@ object GrafanaDashboard {
                     expr: Option[String], format: Option[String], intervalFactor: Option[Int]) {
     def withField(field: String): Target = withField(field, ("${" + field + ":json}").asJson)
 
-    def withField(field: String, value: Json): Target = copy(target =
-      decode[JsonObject](target).toOption.getOrElse(JsonObject())
+    def withField(field: String, value: Json): Target = copy(data =
+      decode[JsonObject](data).toOption.getOrElse(JsonObject())
         .add(field, value).asJson.noNulls)
 
     def withParam(name: String, jsonType: String, required: Boolean) = {
@@ -247,7 +247,7 @@ object GrafanaDashboard {
         "jsonType" -> jsonType.asJson,
         "required" -> required.asJson
       ).asJson)
-      copy(target = obj.add("params", newParams.asJson).asJson.noNulls)
+      copy(data = obj.add("params", newParams.asJson).asJson.noNulls)
     }
   }
 
@@ -330,11 +330,11 @@ object GrafanaDashboard {
     .setTransparent(true)
     .hideLegend
 
-  def mkTableTarget(key: String): Target = Target(
+  def mkTableTarget(key: String): Target = Target(Json.obj("key" -> key.asJson, "type" -> "table".asJson).noNulls, false, "A", key, "table", Some(""), Some("table"), Some(1))/*Target(
     "", hide = false, "A", Json.obj("key" -> key.asJson, "type" -> "table".asJson).noNulls,
-    "table", Some(""), Some("table"), Some(1))
+    "table", Some(""), Some("table"), Some(1))*/
 
-  def mkGraphTarget(key: String): Target = Target(
+  def mkGraphTarget(key: String): Target = Target(Json.obj("key" -> key.asJson, "type" -> "time_series".asJson).noNulls, false, "A", key, "timeseries", None, None, None) /*Target(
     "", hide = false, "A", Json.obj("key" -> key.asJson, "type" -> "time_series".asJson).noNulls,
-    "timeseries", None, None, None)
+    "timeseries", None, None, None)*/
 }
