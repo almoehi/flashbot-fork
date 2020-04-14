@@ -71,6 +71,10 @@ class CoinbaseMarketDataSource extends DataSource {
           case Left(err) =>
             log.error(err.underlying, "Parsing error in Coinbase Pro Websocket: {}", err.message)
             jsonRef ! PoisonPill
+          case Right(jsonValue) if (eventType(jsonValue) == Error) =>
+            val errorObj = jsonValue.as[CoinbaseError].right.get
+            log.error("Coinbase Pro Websocket error {}", errorObj)
+            jsonRef ! jsonValue
           case Right(jsonValue) =>
             jsonRef ! jsonValue
         }
@@ -107,8 +111,7 @@ class CoinbaseMarketDataSource extends DataSource {
           val strMsg = s"""
             {
               "type": "subscribe",
-              "product_ids": ${cbProducts.asJson.noSpaces},
-              "channels": ["full"]
+              "channels": [{"name": "full", "product_ids": ${cbProducts.asJson.noSpaces}}]
             }
           """
           // Send the subscription message
@@ -196,8 +199,7 @@ class CoinbaseMarketDataSource extends DataSource {
           val strMsg = s"""
             {
               "type": "subscribe",
-              "product_ids": ${cbProducts.asJson.noSpaces},
-              "channels": ["matches"]
+              "channels": [{"name": "matches", "product_ids": ${cbProducts.asJson.noSpaces}}]
             }
           """
           // Send the subscription message
@@ -366,6 +368,7 @@ object CoinbaseMarketDataSource {
   val Change = "change"
   val Match = "match"
   val Subscribed = "subscriptions"
+  val Error = "error"
 
   val BookEventTypes = List(Open, Done, Received, Change, Match)
 
@@ -435,6 +438,8 @@ object CoinbaseMarketDataSource {
     implicit def toTrade: Trade = Trade(trade_id.toString,
       TimeFmt.ISO8601ToMicros(time), price.toDouble, size.toDouble, TickDirection.ofMakerSide(side))
   }
+
+  @JsonCodec case class CoinbaseError(`type`: String, message: String)
 
   @JsonCodec case class BackfillCursor(cbAfter: String, lastItemId: String)
 
