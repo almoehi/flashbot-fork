@@ -11,16 +11,19 @@ import scala.xml.transform.{ RewriteRule, RuleTransformer }
   * $ sbt '; set javaOptions += "-Dflashbot.db=postgres"; set javaOptions += "-Dakka.loglevel=INFO" ; runMain examples.CoinbaseIngest'
   */
 
-lazy val scala212 = "2.12.8"
-lazy val scala213 = "2.13.0"
+lazy val scala212 = "2.12.11"
+lazy val scala213 = "2.13.1"
 
 organization in ThisBuild := "com.infixtrading"
 parallelExecution in ThisBuild := false
 scalaVersion in ThisBuild := scala212
 
-lazy val akkaVersion = "2.5.19"
-lazy val akkaHttpVersion = "10.1.5"
-lazy val fbCirceVersion = "0.10.0"
+useCoursier := false
+
+lazy val akkaVersion = "2.5.31"
+lazy val akkaHttpVersion = "10.1.11"
+lazy val fbCirceVersion = "0.10.0" // "0.13.0"
+lazy val jsonSchemaVersion = "0.0.8" //"0.2.3"
 
 lazy val akkaDeps = List(
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
@@ -31,8 +34,10 @@ lazy val akkaDeps = List(
 )
 
 lazy val networkDeps = List(
-  "com.typesafe.akka" %% "akka-slf4j" % "2.5.19",
+  "com.typesafe.akka" %% "akka-slf4j" % akkaVersion,
   "ch.qos.logback" % "logback-classic" % "1.2.3",
+  "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2",
+  "net.logstash.logback" % "logstash-logback-encoder" % "6.3",
 
   // CORS
   "ch.megard" %% "akka-http-cors" % "0.3.0",
@@ -42,7 +47,7 @@ lazy val networkDeps = List(
   "com.softwaremill.sttp" %% "okhttp-backend" % "1.5.7",
 
   // Warning! Changing this to a newer version may cause a conflict with the circe version (0.10.0)
-  "de.heikoseeberger" %% "akka-http-circe" % "1.20.0",
+  "de.heikoseeberger" %% "akka-http-circe" % "1.20.0", // "1.31.0",
 
   // Pusher
   "com.pusher" % "pusher-java-client" % "1.8.1"
@@ -147,7 +152,7 @@ lazy val baseSettings = Seq(
   resolvers ++= Seq(
     Resolver.sonatypeRepo("releases"),
     Resolver.sonatypeRepo("snapshots"),
-    "releases" at "http://nexus.tundra.com/repository/maven-releases/"
+    ("releases" at "http://nexus.tundra.com/repository/maven-releases/").withAllowInsecureProtocol(true)
   ),
   (scalastyleSources in Compile) ++= (unmanagedSourceDirectories in Compile).value,
   ivyConfigurations += CompileTime.hide,
@@ -285,7 +290,8 @@ lazy val macroSettings: Seq[Setting[_]] = Seq(
   ) ++ (
     if (priorTo2_13(scalaVersion.value)) {
       Seq(
-        compilerPlugin("org.scalamacros" % "paradise" % paradiseVersion cross CrossVersion.patch)
+        //compilerPlugin("org.scalamacros" % "paradise" % paradiseVersion cross CrossVersion.patch)
+        compilerPlugin("org.scalamacros" % "paradise" % paradiseVersion cross CrossVersion.full)
       )
     } else Nil
   )
@@ -385,10 +391,12 @@ lazy val flashbot = project
 lazy val core = flashbotModule("core", previousFBVersion).settings(
   libraryDependencies ++= (configDeps ++ akkaDeps ++ timeSeriesDeps ++ 
         networkDeps ++ serviceDeps ++ statsDeps ++ Seq(
-    "com.github.andyglow" % "scala-jsonschema-core_2.12" % "0.0.8",
-    "com.github.andyglow" % "scala-jsonschema-api_2.12" % "0.0.8",
-    "com.github.andyglow" % "scala-jsonschema-circe-json_2.12" % "0.0.8",
-    "com.voxsupplychain" %% "json-schema-parser" % "0.12.1",
+    "com.github.andyglow" %% "scala-jsonschema-core" % jsonSchemaVersion,
+    "com.github.andyglow" %% "scala-jsonschema-api" % jsonSchemaVersion,
+    //"com.github.andyglow" % "scala-jsonschema-macros" % jsonSchemaVersion % Provided,
+    "com.github.andyglow" %% "scala-jsonschema-circe-json" % jsonSchemaVersion,
+    //"com.github.andyglow" %% "scala-jsonschema-parser" % jsonSchemaVersion,
+    "com.voxsupplychain" %% "json-schema-parser" % "0.12.2-SNAPSHOT",
     "org.jgrapht" % "jgrapht" % "1.3.0",
     "org.jgrapht" % "jgrapht-core" % "1.3.0",
     "org.jgrapht" % "jgrapht-io" % "1.3.0",
