@@ -4,12 +4,14 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 import akka.actor.ActorRef
-import akka.http.scaladsl.model.{ContentTypes, HttpEntity}
-import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.model.{ContentTypes, HttpEntity, HttpResponse}
+import akka.http.scaladsl.server.{ExceptionHandler, Route}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.model.StatusCodes._
 import akka.stream.Materializer
 import akka.stream.scaladsl.Sink
+import akka.util.ByteString
+import com.typesafe.scalalogging.LazyLogging
 import flashbot.core.DataType.{LadderType, TradesType}
 import flashbot.core.{CandleFrame, DataType, MarketData, Report, Trade}
 import flashbot.core.Report._
@@ -25,6 +27,7 @@ import io.circe.generic.extras._
 import de.heikoseeberger.akkahttpcirce.ErrorAccumulatingCirceSupport._
 import flashbot.client.FlashbotClient
 import flashbot.models.{Candle, DataPath, Ladder, TakeLast, TimeRange}
+import net.logstash.logback.argument.StructuredArguments.keyValue
 
 import scala.collection.SortedMap
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
@@ -33,7 +36,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.Failure
 
-object GrafanaServer {
+object GrafanaServer extends LazyLogging {
 
   // Preferred ordering of columns. Columns not listed here are added to the end.
   val TradeCols = List("path", "time")
@@ -175,9 +178,59 @@ object GrafanaServer {
   }
 
 
+  val httpExceptionHandler = ExceptionHandler {
+    case io.circe.ParsingFailure(m, t) => toStrictEntity(900.millis){
+      extractRequest{req =>
+
+        val msg = t match {
+          case org.typelevel.jawn.ParseException(msg, index, line, col) =>
+            s"parse error at line=$line index=$index col=$col: $msg"
+          case t:Throwable => t.getLocalizedMessage
+        }
+
+        req.entity match {
+          case strict: HttpEntity.Strict =>
+            logger.error(s"Request to ${req.uri} could not be handled {} {}", keyValue("message", msg), keyValue("body", strict.data.utf8String), t)
+            complete(HttpResponse(InternalServerError, entity = s"Json parse error: $msg"))
+          case _ =>
+            logger.error(s"Request to ${req.uri} could not be handled {}", keyValue("message", msg), t)
+            complete(HttpResponse(InternalServerError, entity = s"Json parse error: $msg"))
+        }
+      }
+    }
+    case t @ DecodingFailure(m, ops) => toStrictEntity(900.millis){
+      extractRequest{req =>
+        val path = CursorOp.opsToPath(ops)
+
+        req.entity match {
+          case strict: HttpEntity.Strict =>
+            logger.error(s"Request to ${req.uri} could not be handled {} {} {}", keyValue("message", m), keyValue("path", path), keyValue("body", strict.data.utf8String), t)
+            complete(HttpResponse(InternalServerError, entity = s"Json parse error: $m"))
+          case _ =>
+            logger.error(s"Request to ${req.uri} could not be handled {} {}", keyValue("message", m), keyValue("path", path), t)
+            complete(HttpResponse(InternalServerError, entity = s"Json parse error: $m"))
+        }
+      }
+    }
+
+    case t:Throwable => toStrictEntity(900.millis){
+      extractRequest{req =>
+
+        req.entity match {
+          case strict: HttpEntity.Strict =>
+            logger.error(s"Request to ${req.uri} could not be handled {}", keyValue("body", strict.data.utf8String), t)
+            complete(HttpResponse(InternalServerError, entity = s"Json parse error: ${t.getLocalizedMessage}"))
+          case _ =>
+            logger.error(s"Request to ${req.uri} could not be handled", t)
+            complete(HttpResponse(InternalServerError, entity = s"Json parse error: ${t.getLocalizedMessage}"))
+        }
+      }
+    }
+  }
+
   def routes(client: FlashbotClient)
             (implicit mat: Materializer,
-             ec: ExecutionContextExecutor): Route = get {
+             ec: ExecutionContextExecutor): Route = handleExceptions(httpExceptionHandler) { get {
     pathSingleSlash {
       complete(HttpEntity(ContentTypes.`application/json`, "{}"))
     }
@@ -195,7 +248,7 @@ object GrafanaServer {
           val toMillis = body.range.end / 1000
 
           val dataSetsFut = Future.sequence(body.targets.toIterator.map[Future[Seq[DataSeries]]] { target =>
-            decode[Query](target.target).toTry match {
+            target.data.as[Query].toTry match {
               case scala.util.Success(
               Query(key, ty, marketOpt, barSizeOpt, strategyOpt, paramsOpt, botOpt, portfolioOpt)) =>
                 (ty, key, strategyOpt) match {
@@ -284,6 +337,7 @@ object GrafanaServer {
         }
       }
     }
+   }
   }
 
   def inferJsonType(key: String, value: Json): Option[String] = {

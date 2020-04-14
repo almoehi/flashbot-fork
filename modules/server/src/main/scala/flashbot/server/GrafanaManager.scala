@@ -22,7 +22,7 @@ import flashbot.core.{EngineLoader, StrategyInfo}
 import flashbot.core.Instrument.CurrencyPair
 import io.circe.generic.JsonCodec
 import io.circe.{Decoder, Encoder, Json, JsonObject}
-
+import net.logstash.logback.argument.StructuredArguments.keyValue
 import scala.util.{Failure, Success}
 
 /**
@@ -60,7 +60,7 @@ class GrafanaManager(host: String, apiKey: String, dataSourcePort: Int,
               mkTemplate("market")
                 .withLabelledOptions(markets.map(x => (x.toString, x.label)):_*)
                 .fallbackSelected(markets
-                  .find(m => m.exchange.toLowerCase == "coinbase" && m.symbol == "btc_usd")
+                  .find(m => m.exchange.toLowerCase == "coinbase" && m.symbol == "btc_eur")
                   .orElse(markets.headOption)
                   .map(_.toString))
                 .copy(hide = 1))
@@ -118,7 +118,11 @@ class GrafanaManager(host: String, apiKey: String, dataSourcePort: Int,
     payload = DashboardPost(dash,
         folderId,
         overwrite = false)
-    _ <- post[DashboardPost, DashboardPostRsp](s"api/dashboards/db", payload)
+    _ <- post[DashboardPost, DashboardPostRsp](s"api/dashboards/db", payload).recover{
+      case t:Throwable =>
+        log.error(t, "Failed to create dashboards", keyValue("payload", payload.asJson.toString()))
+        DashboardPostRsp(0, s"api/dashboards/db", "500", 0)
+    }
   } yield dash
 
   def ensureDataSource: Future[Long] = for {
