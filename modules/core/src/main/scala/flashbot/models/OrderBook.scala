@@ -98,19 +98,19 @@ class OrderBook(val tickSize: Double,
     _bidsArray
   }
 
-//  override def equals(obj: Any) = obj match {
-//    case book: OrderBook if size == book.size =>
-//      stream.zip(book.stream).forall {
-//        case (o1, o2) => o1 == o2
-//      }
-//    case _ => false
-//  }
+  override def equals(obj: Any) = obj match {
+    case book: OrderBook if size == book.size =>
+      stream.zip(book.stream).forall {
+        case (o1, o2) => o1.equals(o2)
+      }
+    case _ => false
+  }
 
-//  override def hashCode() = {
-//    val b = new mutable.StringBuilder()
-//    orders.foreachKey(b.append)
-//    b.mkString.hashCode
-//  }
+  override def hashCode() = {
+    val b = new StringBuilder()
+    orders.keySet.forEach(s => b.append(s.toString))
+    b.mkString.hashCode
+  }
 
   def isInitialized: Boolean = !orders.isEmpty
 
