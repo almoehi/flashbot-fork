@@ -13,6 +13,7 @@ import akka.persistence._
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{Materializer, OverflowStrategy}
 import akka.util.Timeout
+import com.typesafe.scalalogging.Logger
 import flashbot.client.FlashbotClient
 import flashbot.core.DataType.CandlesType
 import flashbot.core.FlashbotConfig.{BotConfig, ExchangeConfig, GrafanaConfig, StaticBotsConfig}
@@ -96,7 +97,7 @@ class TradingEngine(engineId: String,
   // Start the Grafana data source server if the dataSourcePort is defined.
   if (grafana.dataSource) {
     Http().bindAndHandle(GrafanaServer.routes(new FlashbotClient(self, skipTouch = true)),
-      "localhost", grafana.dataSourcePort)
+      "localhost", grafana.dataSourcePort, log = log)
   }
 
   // Start the Grafana manageer if the API key is defined.
@@ -230,8 +231,19 @@ class TradingEngine(engineId: String,
         case Some(bot) if bot.enabled =>
           Future.failed(new IllegalArgumentException(s"Bot $id is already enabled"))
         case Some(_) =>
-          startBot(id).map(sessionStartedEvent =>
-            (Done, Seq(BotEnabled(id), sessionStartedEvent)))
+          try {
+            startBot(id).map(sessionStartedEvent =>
+              (Done, Seq(BotEnabled(id), sessionStartedEvent)))
+              .recoverWith{
+                case t:Throwable =>
+                  log.error(t, s"startBot failed id=$id")
+                  Future.failed(t)
+              }
+          } catch {
+            case t:Throwable =>
+              log.error(t, s"startBot failed id=$id")
+              Future.failed(t)
+          }
       }
 
     case DisableBot(id) =>
@@ -416,11 +428,22 @@ class TradingEngine(engineId: String,
           new IllegalArgumentException("Patterns are not currently supported in time series queries."))
         else {
 
-          def viaBacktest: Future[debox.Map[String, CandleFrame]] = {
+          def viaBacktest: Future[Map[String, CandleFrame]] = {
             val params = TimeSeriesStrategy.Params(query.path)
             (self ? BacktestQuery("time_series", params.asJson, query.range, "", Some(query.interval)))
               .mapTo[ReportResponse]
-              .map(_.report.timeSeries)
+              .recover{
+                case t:Throwable =>
+                  log.error(t, "BacktestQuery failed")
+                  throw t
+              }
+              .map{_ match {
+                  case r:ReportResponse if r.report.error.isDefined =>
+                    log.error(r.report.error.get, s"Failed to create report")
+                    r.report.getTimeSeries
+                  case r:ReportResponse => r.report.getTimeSeries
+                }
+              }
           }
 
           def viaDataServer(req: DataStreamReq[Candle],
@@ -440,6 +463,7 @@ class TradingEngine(engineId: String,
             case PriceQuery(path, range, interval) =>
               for {
               index <- (dataServer ? MarketDataIndexQuery).mapTo[Map[Long, DataPath[Any]]]
+              _ = {log.info(s"BundleIndex: $index")}
 
               candlePath = path.withType(CandlesType(interval))
               exactMatch = index.values.collectFirst {
@@ -452,7 +476,9 @@ class TradingEngine(engineId: String,
               matchedPath = exactMatch.orElse(finestMatch)
               matchedRequest = matchedPath.map(p =>
                 DataStreamReq(DataSelection(p, Some(range.start), Some(range.end))))
+              _ = {log.info(s"Matched requests $matchedRequest")}
               result <- matchedRequest.map(viaDataServer(_, interval)).getOrElse(viaBacktest)
+
             } yield result
 
             case _ =>
@@ -505,18 +531,23 @@ class TradingEngine(engineId: String,
 
             // Send the report event to the listener.
             emitEvent(ev, listenerOnly = true)
-
+            //println(s"ReportEvent: $ev")
             // Shut down the main portfolio ref and the listener when a SessionComplete event arrives.
             ev match {
               case SessionSuccess => emitEvent(Status.Success(Done))
               case SessionFailure(err) => emitEvent(Status.Failure(err))
+              case _ => // ignore
             }
 
             // Update the report we're scanning over.
             r.update(ev)
           })
           .toMat(Sink.last)(Keep.right)
-          .run
+          .run.recover{
+            case t:Throwable =>
+              log.error(t, "reportEventSrc failed")
+              initialReport
+          }
 
         // Transform SessionInitializationError as a failure at the Future level.
         initEvent transform {
@@ -533,10 +564,10 @@ class TradingEngine(engineId: String,
         } flatMap { _ =>
           reportFuture()
 
-        // Finally, close the timer.
+        // Finally, close the timer and sesssion.
         } andThen { case _ =>
           timer.close()
-
+          session.shutdown()
         // Map to a ReportResponse and pipe back to sender
         } map ReportResponse pipeTo sender
 
@@ -550,15 +581,21 @@ class TradingEngine(engineId: String,
     case cmd: TradingEngineCommand =>
       val now = Instant.now
       // Blocking!
-      val result = Await.ready(processCommand(cmd, now), timeout.duration).value.get
-      result match {
-        case Success((response, events)) =>
-          val immutableSeq = events.asInstanceOf[immutable.Seq[TradingEngineEvent]]
-          persistAll(immutableSeq)(persistenceCallback(now))
-          sender ! response
+      try {
+        val result = Await.ready(processCommand(cmd, now), timeout.duration).value.get
+        result match {
+          case Success((response, events)) =>
+            val immutableSeq = events.asInstanceOf[immutable.Seq[TradingEngineEvent]]
+            persistAll(immutableSeq)(persistenceCallback(now))
+            sender ! response
 
-        case Failure(err) =>
-          Future.failed(err) pipeTo sender
+          case Failure(err) =>
+            Future.failed(err) pipeTo sender
+        }
+      } catch {
+        case t:Throwable =>
+          log.error(t, s"Error processing TradingEngineCommand $cmd")
+          Future.failed(t) pipeTo sender
       }
   }
 
@@ -609,16 +646,21 @@ class TradingEngine(engineId: String,
 
     // Start the session. We are only waiting for an initialization error, or a confirmation
     // that the session was started, so we don't wait for too long.
-    val fut = session.start() transform {
+    val fut = session.start().map{res =>
+      log.info(s"Session start $res")
+      res
+    }.recover{
+      case t:Throwable =>
+        log.error(t, "session start failed")
+        throw t
+    } transform {
       case Success(setup) =>
-        log.debug("Trading session initialized")
-        Success(SessionInitialized(setup.sessionId, botId, strategyKey, strategyParams,
-          mode, setup.sessionMicros, report))
+        log.info("Trading session initialized")
+        Success(SessionInitialized(setup.sessionId, botId, strategyKey, strategyParams, mode, setup.sessionMicros, report))
 
       case Failure(err: Exception) =>
         log.error(err, "Error during trading session init. Wrapping in a SessionInitializationError.")
-        Success(SessionInitializationError(err, botId, strategyKey, strategyParams,
-          mode, portfolioRef.toString, report))
+        Success(SessionInitializationError(err, botId, strategyKey, strategyParams, mode, portfolioRef.toString, report))
 
       case Failure(err) =>
         log.error(err, "Fatal error during trading session init")
@@ -632,7 +674,7 @@ class TradingEngine(engineId: String,
     allBotConfigs(name) match {
       case BotConfig(strategy, mode, params, _, initial_assets, initial_positions) =>
 
-        log.debug(s"Starting bot $name")
+        log.info(s"Starting bot $name")
 
         val initialAssets = debox.Map.fromIterable(initial_assets.map(kv => Account.parse(kv._1) -> kv._2))
         val initialPositions = debox.Map.fromIterable(initial_positions.map(kv => Market.parse(kv._1) -> kv._2))
