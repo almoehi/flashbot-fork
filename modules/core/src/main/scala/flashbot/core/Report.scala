@@ -20,10 +20,10 @@ class Report(val strategy: String,
              val params: Json,
              val barSize: FiniteDuration,
              val portfolio: Portfolio,
-             val trades: debox.Buffer[TradeEvent],
-             val collections: debox.Map[String, debox.Buffer[Json]],
-             val timeSeries: debox.Map[String, CandleFrame],
-             val values: debox.Map[String, ReportValue[Any]],
+             private val trades: debox.Buffer[TradeEvent],
+             private val collections: debox.Map[String, debox.Buffer[Json]],
+             private val timeSeries: debox.Map[String, CandleFrame],
+             private val values: debox.Map[String, ReportValue[Any]],
              var isComplete: Boolean,
              var error: Option[ReportError],
              val lastUpdate: MutableOpt[ReportEvent]) extends HasUpdateEvent[Report, ReportEvent] {
@@ -32,6 +32,11 @@ class Report(val strategy: String,
   def timeSeriesJava: util.Map[String, CandleFrame] = JavaUtils.fromDebox(timeSeries)
   def valuesJava: util.Map[String, ReportValue[Any]] = JavaUtils.fromDebox(values)
   def tradesJava: lang.Iterable[TradeEvent] = JavaUtils.fromDebox(trades)
+
+  def getCollections: Map[String, Buffer[Json]] = collections.iterator().toMap
+  def getTimeSeries: Map[String, CandleFrame] = timeSeries.iterator().toMap
+  def getValues: Map[String, ReportValue[Any]] = values.iterator().toMap
+  def getTrades: Iterable[TradeEvent] = trades.elems
 
   override protected def _step(delta: ReportEvent): Report = delta match {
     case ev: TradeEvent =>
@@ -100,6 +105,10 @@ class Report(val strategy: String,
 
     case portfolioDelta: PortfolioDelta =>
       portfolio.update(portfolioDelta)
+      this
+
+    case _ =>
+      // ignore !
       this
   }
 
