@@ -13,6 +13,8 @@ class Coinbase(implicit val system: ActorSystem,
 //  override def takerFee = 0.003
 //  override def takerFee = -0.00035
 
+  // TODO: should pull this from CoinbasePro API !!
+
   override val params: ExchangeParams = {
     new ExchangeParams(
       // Base params
@@ -24,6 +26,18 @@ class Coinbase(implicit val system: ActorSystem,
       // Instrument specific
       new java.util.HashMap[String, InstrumentParams](){{
         put("btc_usd", new InstrumentParams(){{
+          tickSize = 0.01
+        }})
+        put("eth_usd", new InstrumentParams(){{
+          tickSize = 0.01
+        }})
+        put("btc_eur", new InstrumentParams(){{
+          tickSize = 0.01
+        }})
+        put("eth_eur", new InstrumentParams(){{
+          tickSize = 0.01
+        }})
+        put("ltc_eur", new InstrumentParams(){{
           tickSize = 0.01
         }})
       }})
