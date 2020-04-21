@@ -4,13 +4,14 @@ import flashbot.util.time._
 import java.time.{Duration, Instant}
 
 import flashbot.core.Timestamped.HasTime
+import flashbot.util.timeseries.TimeSeriesFactory.GenericTimeSeries
 import org.ta4j.core.{Bar, BaseTimeSeries, TimeSeries}
 
 import scala.collection.AbstractIterator
 import scala.collection.mutable.ArrayBuffer
 
 abstract class TimeSeriesLike[A: HasTime](private val it: Iterator[A], val interval: Duration)
-    extends AbstractIterator[A] {
+  extends AbstractIterator[A] {
 
   type C
   val elems: C
@@ -63,10 +64,18 @@ object TimeSeriesFactory extends TimeSeriesLikeDefaultImplicits {
   object Bars extends TimeSeriesFactory[Bar] {
     override def fromTickingIterator(it: Iterator[Bar], interval: Duration) = new Bars(it, interval)
   }
+
+  class GenericTimeSeries[A: HasTime](it: Iterator[A], interval: Duration) extends TimeSeriesLike[A](it, interval) {
+    type C = ArrayBuffer[A]
+    override val elems: C = new ArrayBuffer[A]()
+    override protected def insert(item: A): Unit = elems.append(item)
+    override def ilocOpt(i: Int) = Option(elems(i))
+  }
+
 }
 
 trait TimeSeriesLikeDefaultImplicits {
-  implicit def genericTimeSeriesLike[A]: TimeSeriesFactory[A] = ???
+  implicit def genericTimeSeriesLike[A : HasTime]: TimeSeriesFactory[A] = (it: Iterator[A], interval: Duration) => new GenericTimeSeries[A](it, interval)
 }
 
 
