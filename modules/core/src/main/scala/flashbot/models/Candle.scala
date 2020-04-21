@@ -1,5 +1,10 @@
 package flashbot.models
 
+import java.time.ZoneId
+import java.time.format.{DateTimeFormatter, FormatStyle}
+import java.time.temporal.ChronoField
+import java.util.Locale
+
 import flashbot.core.{Priced, Timestamped}
 import flashbot.util.timeseries.Scannable._
 import flashbot.util.time._
@@ -27,7 +32,11 @@ case class Candle(micros: Long,
   )
 
   override def price = close
-
+  /*
+  protected val fmt = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.FULL)
+    .withLocale( Locale.US)
+    .withZone( ZoneId.systemDefault() )
+  */
   override def toString = {
     s"Candle(${micros.microsToInstant}, o: $open, h: $high, l: $low, c: $close, v: $volume)"
   }
