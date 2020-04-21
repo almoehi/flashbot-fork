@@ -98,7 +98,7 @@ package object db {
 
   def createBundles(path: DataPath[_])(implicit session: SlickSession): Future[(Long, Long)] = {
     import session.profile.api._
-    val item = BundleRow(0l, path.source, path.topic, path.datatype.toString)
+    val item = BundleRow(0L, path.source, path.topic, path.datatype.toString)
     session.db.run((Bundles returning Bundles.map(_.id)) ++= Seq(item, item))
       .map(ids => (ids.head, ids.last))
   }
