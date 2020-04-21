@@ -326,12 +326,34 @@ package object timeseries {
         groupIndex = split()
         (prevIndex, groupIt)
       }
-    }.drop(if (dropFirst) 1 else 0)
+    }.drop(if (dropFirst) 1 else 0)/*
+      .drop(if (dropFirst) 1 else 0).scanLeft[Option[(Long, C)]](None) {
+      // First group
+      case (None, (nextCandleIndex, nextItems)) =>
+        val initialCandle: C = scanner.empty(timeStep.toMicros * nextCandleIndex, timeStep, None)
+        val calcedCandle = nextItems.foldLeft[C](initialCandle)(scanner.fold)
+        Some((nextCandleIndex, calcedCandle))
+
+      // Next group. i.e. nextIndex = prevIndex + 1
+      case (Some((prevIndex, prevCandle)), (nextIndex, nextItems)) if prevIndex + 1 == nextIndex =>
+        val initialCandle: C = scanner.empty(timeStep.toMicros * nextIndex, timeStep, Some(prevCandle))
+        Some((nextIndex, nextItems.foldLeft[C](initialCandle)(scanner.fold)))
+
+      // Detected missing time steps. Fill them in.
+      case (Some((prevIndex, prevCandle)), (nextIndex, _)) if prevIndex + 1 < nextIndex =>
+        val micros = timeStep.toMicros * (prevIndex + 1)
+        Some((prevIndex + 1, scanner.empty(micros, timeStep, Some(prevCandle))))
+
+    }.drop(1).map(_.get)//.map(_.get._2)
+    */
+
+    //println(s"GroupIterator size: ${groupIterator.size}")
+    //println(s"GroupIterator")
+    //spareIt.toList.map(el => (el._1,el._2.size)).map(println)
 
     val finalIt: Iterator[C] = new Iterator[C] {
       var bufferedNext: Long = -1
-      var bufferedIt: Iterator[I] = null
-
+      var bufferedIt: Iterator[I] = _ // null
       var lastIdx: Long = -1
       var lastItem: Option[C] = None
 
@@ -347,22 +369,22 @@ package object timeseries {
         // Initialize by buffering the first iterator
         if (bufferedIt == null) {
           if (groupIterator.hasNext) {
-            fetchNextIt();
+            fetchNextIt()
           } else {
-            return false;
+            return false
           }
         }
 
         // If we have no more items to iterate on the current buffered it, get the next one.
         else if (isCaughtUp) {
           if (groupIterator.hasNext) {
-            fetchNextIt();
+            fetchNextIt()
           } else {
-            return false;
+            return false
           }
         }
 
-        true;
+        true
       }
 
       override def next() = {
@@ -381,11 +403,11 @@ package object timeseries {
             lastItem = Some(scanner.fold(init, item))
             lastIdx = bufferedNext
           } else {
+            //println(s"lastIdx=$lastIdx | bufferedNext=$bufferedNext | timeStepLag=$timeStepLag")
             lastItem = Some(scanner.empty(timeStep.toMicros * (lastIdx + 1), timeStep, lastItem))
             lastIdx = lastIdx + 1
           }
         }
-
         lastItem.get
       }
     }
