@@ -13,6 +13,8 @@ import scala.util.{Failure, Success, Try}
 
 abstract class Exchange {
 
+  // TODO: add an init method to fetch available products
+
   // Exchange API request implementations
   def order(req: PostOrderRequest): Future[ExchangeResponse]
   def cancel(id: String, instrument: Instrument): Future[ExchangeResponse]
