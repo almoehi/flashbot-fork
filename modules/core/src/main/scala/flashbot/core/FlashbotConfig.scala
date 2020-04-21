@@ -45,9 +45,10 @@ object FlashbotConfig {
     def filterSources(sources: Set[String]): Set[String] =
       filterIngestSources(sources) ++ filterBackfillSources(sources)
 
-    def retentionFor(path: DataPath[_]): Option[FiniteDuration] =
-      retention.find(record => DataPath(record.head).matches(path))
+    def retentionFor(path: DataPath[_]): Option[FiniteDuration] = {
+      retention.filter(_.nonEmpty).find(record => DataPath(record.head).matches(path))
         .map(record => time.parseDuration(record.last))
+    }
   }
 
   @ConfiguredJsonCodec(decodeOnly = true)
