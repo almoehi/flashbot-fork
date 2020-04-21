@@ -105,7 +105,7 @@ class DataSourceActor(session: SlickSession,
      * ==================
      */
     case Init(None) =>
-      log.debug("{} DataSource initialized", srcKey)
+      log.info("{} DataSource initialized", srcKey)
 
       if (ingestConfig.enabled.nonEmpty) {
         // Build initial queue
@@ -146,7 +146,7 @@ class DataSourceActor(session: SlickSession,
       // Take the first topic set and schedule
       queue.headOption match {
         case Some((dataType, topicSet)) =>
-          log.debug("Scheduling ingest for {}/{} with topics: {}",
+          log.info("Scheduling ingest for {}/{} with topics: {}",
             srcKey, dataType, topicSet.mkString(", "))
 
           runScheduledIngest(dataType)
@@ -170,7 +170,7 @@ class DataSourceActor(session: SlickSession,
               case Right(ts) =>
                 dataSource.ingestGroup[T](ts, dataType.asInstanceOf[DataType[T]])
             }
-            _ = log.debug("Ingest streams: {}", streams)
+            _ = log.info("Ingest streams: {}", streams)
           } yield streams.filterKeys(topic =>
             matchers.exists(_.matches(DataPath(srcKey, topic, dataType))))
 
@@ -211,14 +211,14 @@ class DataSourceActor(session: SlickSession,
                         // Start a backfill service for ingesting historical data and deleting data
                         // that's older than the retention period.
                         if (ingestConfig.backfillMatchers.exists(_.matches(path))) {
-                          log.debug(s"Launching BackfillService for {}", path)
+                          log.info(s"Launching BackfillService for {}", path)
                           context.actorOf(Props(new BackfillService(backfillBundleId, path, dataSource)))
                         } else {
                           log.debug("Skipping backfill for {}", path)
                         }
 
                         // Start a retention service for every paths.
-                        log.debug(s"Launching RetentionService for {}", path)
+                        log.info(s"Launching RetentionService for {}", path)
                         context.actorOf(Props(new RetentionService(path,
                           ingestConfig.retentionFor(path), dataSource.backfillTickRate)))
 
@@ -229,8 +229,10 @@ class DataSourceActor(session: SlickSession,
                         subscriptions.computeIfAbsent(path.toString, _ => Set.empty[ActorRef])
                         subscriptions.computeIfPresent(path.toString, (_, s) => s)
 
-                        case class ScanState(lastSnapshotAt: Long, seqId: Long,
-                                             micros: Long, item: T, delta: Option[fmt.D],
+                        case class ScanState(lastSnapshotAt: Long,
+                                             seqId: Long,
+                                             micros: Long, item: T,
+                                             delta: Option[fmt.D],
                                              snapshot: Option[T])
 
                         // Here is where we process the market data coming from ingest data sources.
@@ -248,9 +250,10 @@ class DataSourceActor(session: SlickSession,
                               val shouldSnapshot =
                                 (micros - prev.lastSnapshotAt) >= SnapshotInterval.toMicros
                               Some(ScanState(
-                                if (shouldSnapshot) micros else prev.lastSnapshotAt,
-                                seqId, micros, item, Some(fmt.diff(prev.item, item)),
-                                if (shouldSnapshot) Some(item) else None)
+                                  if (shouldSnapshot) micros else prev.lastSnapshotAt,
+                                  seqId, micros, item, Some(fmt.diff(prev.item, item)),
+                                  if (shouldSnapshot) Some(item) else None
+                                )
                               )
                           }
                           .collect { case Some(state) => state }
