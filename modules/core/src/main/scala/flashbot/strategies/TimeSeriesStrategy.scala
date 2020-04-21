@@ -1,7 +1,7 @@
 package flashbot.strategies
 
 import flashbot.core.{MarketData, Strategy, _}
-import flashbot.models.{DataPath, Portfolio}
+import flashbot.models.{DataPath, Market, Portfolio}
 import io.circe.generic.JsonCodec
 import io.circe.parser._
 import TimeSeriesStrategy._
@@ -20,8 +20,14 @@ class TimeSeriesStrategy extends Strategy[Params] with TimeSeriesMixin {
 
   override def onData(marketData: MarketData[_]): Unit = marketData.data match {
 
-    case _: Priced =>
+    case trade: Trade =>
+      recordTimeSeries(s"price", marketData.micros, trade.price)
+      recordTimeSeries(s"volume", marketData.micros, trade.size)
+      recordTrade(Market(marketData.source, marketData.topic), marketData.micros, trade.price, Some(trade.size))
+
+    case pd: Priced =>
       ServerMetrics.inc("time_series_strategy_data_count")
+      recordTimeSeries(s"price", marketData.micros, pd.price)
 
     case x => // Ignore non-priced data
   }

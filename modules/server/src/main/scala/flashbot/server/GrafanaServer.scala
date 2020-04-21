@@ -218,10 +218,10 @@ object GrafanaServer extends LazyLogging {
 
         req.entity match {
           case strict: HttpEntity.Strict =>
-            logger.error(s"Request to ${req.uri} could not be handled {}", keyValue("body", strict.data.utf8String), t)
+            logger.error(s"Error handling request ${req.uri} {}", keyValue("body", strict.data.utf8String), t)
             complete(HttpResponse(InternalServerError, entity = s"Json parse error: ${t.getLocalizedMessage}"))
           case _ =>
-            logger.error(s"Request to ${req.uri} could not be handled", t)
+            logger.error(s"Error handling request ${req.uri}", t)
             complete(HttpResponse(InternalServerError, entity = s"Json parse error: ${t.getLocalizedMessage}"))
         }
       }
@@ -251,33 +251,35 @@ object GrafanaServer extends LazyLogging {
             target.data.as[Query].toTry match {
               case scala.util.Success(
               Query(key, ty, marketOpt, barSizeOpt, strategyOpt, paramsOpt, botOpt, portfolioOpt)) =>
-                (ty, key, strategyOpt) match {
+                (ty, key, strategyOpt, marketOpt.filter(_.nonEmpty)) match {
 
-                  case ("time_series", _, Some(strategy)) =>
+                  case ("time_series", _, Some(strategy), Some(market)) =>
                     val barSize = parseDuration(barSizeOpt.get)
                     val cacheKey = BacktestCacheKey(strategy, paramsToJson(paramsOpt.get),
                       portfolioOpt.get, barSize, body.range)
                     getBacktestReport(client, cacheKey).map(report => {
-                      Seq(buildSeries(key, key, report.timeSeries.iterator.toMap))
+                      Seq(buildSeries(key, key, report.getTimeSeries))
                     })
 
-                  case ("table", _, Some(strategy)) =>
+                  case ("table", _, Some(strategy), Some(market)) =>
                     val barSize = parseDuration(barSizeOpt.get)
                     val cacheKey = BacktestCacheKey(strategy, paramsToJson(paramsOpt.get),
                       portfolioOpt.get, barSize, body.range)
 
                     getBacktestReport(client, cacheKey).map(report => {
-                      if (report.collections.contains(key))
-                        Seq(buildTable(report.collections(key).toList.flatMap(_.asObject), List()))
-                      else if (report.values.contains(key)) {
-                        val en = implicitly[Encoder[debox.Map[String, ReportValue[Any]]]]
-                        val foo: Json = report.values.asJson(en).asObject.get(key).get
+                      val coll = report.getCollections
+                      lazy val vals = report.getValues
+                      if (coll.contains(key))
+                        Seq(buildTable(coll(key).toList.flatMap(_.asObject), List()))
+                      else if (vals.contains(key)) {
+                        //val en = implicitly[Encoder[debox.Map[String, ReportValue[Any]]]]
+                        val foo: Json = vals.asJson.asObject.get(key).get
                         Seq(buildTable(Seq(JsonObject("value" -> foo)), List()))
                       } else Seq(buildTable(Seq(JsonObject("error" -> "no data".asJson)), List()))
                     })
 
-                  case (_, "trades", _) =>
-                    val path = DataPath.wildcard.withType(TradesType).withMarket(marketOpt.get)
+                  case (_, "trades", _, Some(market)) =>
+                    val path = DataPath.wildcard.withType(TradesType).withMarket(market)
                     for {
                       streamSrc <- client.historicalMarketDataAsync[Trade](path,
                         Some(Instant.ofEpochMilli(fromMillis)),
@@ -287,8 +289,8 @@ object GrafanaServer extends LazyLogging {
                       tradeMDs <- streamSrc.runWith(Sink.seq)
                     } yield Seq(buildTable(tradeMDs.reverse.map(_.asJsonObject), TradeCols))
 
-                  case (_, "orderbook", _) =>
-                    val path = DataPath.wildcard.withType(LadderType(Some(12))).withMarket(marketOpt.get)
+                  case (_, "orderbook", _, Some(market)) =>
+                    val path = DataPath.wildcard.withType(LadderType(Some(12))).withMarket(market)
                     for {
                       streamSrc <- client.pollingMarketDataAsync[Ladder](path)
                       ladder <- streamSrc.runWith(Sink.head)
@@ -300,14 +302,16 @@ object GrafanaServer extends LazyLogging {
                         LadderCols)
                     } yield Seq(t)
 
-                  case (_, "price", _) =>
-                    val path = DataPath.wildcard.withType(TradesType).withMarket(marketOpt.get)
+                  case (_, "price", _, Some(market)) =>
+                    val path = DataPath.wildcard.withType(TradesType).withMarket(market)
                     val barSize = parseDuration(barSizeOpt.get)
                     client.pricesAsync(path, body.range, barSize)
                       .map(ts => Seq(
                         buildSeries("price", s"${path.source}.${path.topic}", ts),
                         buildSeries("volume", s"${path.source}.${path.topic}", ts,
-                          _.volume.toArray, scaleTo(0, 1))))
+                          _.volume.toArray, scaleTo(0, 1)))
+                      )
+                  case _ => Future.failed(new IllegalArgumentException("missing or wrong parameters"))
                 }
 
               case Failure(exception) => Future.failed(exception)

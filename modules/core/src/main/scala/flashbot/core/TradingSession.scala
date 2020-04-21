@@ -6,7 +6,7 @@ import akka.{Done, NotUsed}
 import akka.actor.{ActorRef, Cancellable, Scheduler}
 import akka.event.LoggingAdapter
 import akka.stream.{KillSwitches, Materializer, OverflowStrategy, SharedKillSwitch}
-import akka.stream.scaladsl.{Keep, Source}
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import flashbot.core.Report.ReportError
 import flashbot.core.ReportEvent.{SessionFailure, SessionSuccess}
 import flashbot.core.TradingSession.{DataStream, SessionSetup}
@@ -130,7 +130,7 @@ class TradingSession(val strategyKey: String,
 
 
   private var killSwitch: SyncVar[Option[SharedKillSwitch]] = new SyncVar()
-  killSwitch.put(None)
+  //killSwitch.put(None)
 
   var asyncTickSrc: Option[Source[Tick, NotUsed]] = None
   private val scheduler: EventScheduler =
@@ -148,7 +148,7 @@ class TradingSession(val strategyKey: String,
   def setInterval(delayMicros: Long, fn: Runnable): Cancellable = scheduler.setInterval(delayMicros, fn)
 
   def emitReportEvent(event: ReportEvent): Unit = {
-    reportEventsRef
+    reportEventsRef ! event
   }
 
   def ping: Future[Pong] = {
@@ -213,11 +213,13 @@ class TradingSession(val strategyKey: String,
   protected[flashbot] def start(): Future[SessionSetup] = this.synchronized {
     assert(completeFut.isEmpty, "Session already started")
 
-    lazy val ks = KillSwitches.shared(id.get)
+    log.info(s"TradingSession start ${this}")
+    val theId = java.util.UUID.randomUUID().toString
+    val ks = KillSwitches.shared(theId)
 
     val sessionInitFuture = for {
       // Load all setup vals
-      setup <- load
+      setup <- load.map(_.copy(sessionId=theId))
       _ = {
         strategy = setup.strategy
         id = Some(setup.sessionId)
@@ -232,11 +234,16 @@ class TradingSession(val strategyKey: String,
       dataStreams.reduce[DataStream](
         if (mode.isBacktest) _.mergeSorted(_)(Ordering.by[MarketData[_], Long](_.micros))
         else _.merge(_))
+//        .alsoTo(Sink.foreach { x =>
+//          //log.debug(s"Session DataStream item: $x")
+//          println(s"Session DataStream item: $x")
+//        })
+//        .via(ks.flow)
         .watchTermination()(Keep.right)
         .preMaterialize()
 
       // Shutdown the session when market data streams are complete.
-      _ = dataStreamsDone.onComplete(_ => ks.shutdown())
+      _ = dataStreamsDone.onComplete(_ => shutdown()) // was: ks.shutdown() but probably should be session.shutdown()
 
       // Merge the async tick stream into the main data stream for live data. This will
       // only occur for live and paper trading sessions.
@@ -249,7 +256,12 @@ class TradingSession(val strategyKey: String,
       _ = {
         killSwitch.put(Some(ks))
       }
-    } yield (setup, tickStream)
+    } yield {
+      log.debug(s"Session init completed $setup")
+      (setup, tickStream)
+    }
+
+
 
 
     /**
@@ -258,7 +270,7 @@ class TradingSession(val strategyKey: String,
       * =============
       */
     val mainLoopFut = for {
-      (setup, tickStream) <- sessionInitFuture
+      (setup,tickStream) <- sessionInitFuture
       done <- tickStream runForeach { tick =>
         tick match {
           case md: MarketData[_] =>
@@ -268,15 +280,15 @@ class TradingSession(val strategyKey: String,
             md.data match {
               case pd: Priced =>
                 prices.setPrice(Market(md.source, md.topic), pd.price)(instruments)
-                portfolioRef.update(this,
-                  _.initializePositions(prices, instruments, ServerMetrics))
+                portfolioRef.update(this, _.initializePositions(prices, instruments, ServerMetrics))
 
-              case _ =>
+              case _ => // ignore
             }
 
             // Update the simulator with the new market data. This lets it emit fills and stuff.
             if (mode.isBacktest && setup.exchanges.isDefinedAt(md.source)) {
               val sim = setup.exchanges(md.source).asInstanceOf[Simulator]
+              sim.marketDataUpdate(md)
             }
 
             // Fast forward the event loop.
@@ -293,6 +305,8 @@ class TradingSession(val strategyKey: String,
         // can process all ticks scheduled for after the last piece of market data.
         case Success(_) =>
           scheduler.fastForward(Long.MaxValue, processTick)
+        case other =>
+          log.debug(s"mainLoop result: $other")
       }
     } yield done
 
@@ -325,6 +339,9 @@ class TradingSession(val strategyKey: String,
         Future.successful(Done)
       }
     _ = { killSwitch.put(ks) }
+    _ = {
+      log.info(s"TradingSession successfully shutdown")
+    }
   } yield Done
 
   def getPortfolio: Portfolio = portfolioRef.getPortfolio(Some(instruments))
@@ -370,7 +387,7 @@ class TradingSession(val strategyKey: String,
         _ = strategy.setParams(decodedParams)
 
         // Set the var buffer
-        _ = strategy.setVarBuffer(new VarBuffer(initialReport.values.mapValues(_.value)))
+        _ = strategy.setVarBuffer(new VarBuffer(debox.Map.fromIterable(initialReport.getValues).mapValues(_.value)))
 
         // Set the bar size
         _ = strategy.setSessionBarSize(initialReport.barSize)
