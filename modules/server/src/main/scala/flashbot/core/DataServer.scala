@@ -76,6 +76,7 @@ class DataServer(dbConfig: Config,
   val cluster: Option[Cluster] =
     if (context.system.hasExtension(Cluster)) Some(Cluster(context.system)) else None
   override def preStart() = {
+    log.info(s"Using database: {}", slickSession.db.source)
     if (cluster.isDefined) {
       cluster.get.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberUp])
     }
@@ -164,7 +165,7 @@ class DataServer(dbConfig: Config,
       */
     case DataStreamReq(DataSelection(anyPath, from, to), takeLimit) =>
       val nowMicros = time.currentTimeMicros
-      log.debug("Received data stream request for path {} ({} to {})", anyPath,
+      log.info("Received data stream request for path {} ({} to {})", anyPath,
         from.map(x => Instant.ofEpochMilli(x / 1000)),
         to.map(x => Instant.ofEpochMilli(x / 1000)))
       def buildRsp[T](path: DataPath[T]): Future[StreamResponse[MarketData[T]]] = {
@@ -187,7 +188,7 @@ class DataServer(dbConfig: Config,
 
             // If it's a valid polling request, search all data servers for a live stream.
             case (_, None, _) =>
-              log.debug("Searching for live stream")
+              log.info("Searching for live stream {}", path)
               searchForLiveStream[T](path, self :: remoteDataServers.values.toList)
                 .flatMap(_.toFut(LiveDataNotFound(path)))
                 .map(_.toSource)
@@ -203,7 +204,7 @@ class DataServer(dbConfig: Config,
             // If `from` is none, the historical part of the stream is empty.
             .getOrElse[Future[Source[MarketData[T], NotUsed]]](Future.successful(Source.empty))
 
-          _ = { log.debug("Built historical stream") }
+          _ = { log.info("Built historical stream {}", path) }
 
           joined = historical.concat(live).via(dropUnordered(MarketData.orderBySequence[T]))
 
@@ -223,19 +224,17 @@ class DataServer(dbConfig: Config,
       * Returns None if not found. Do not use search here. Search uses this.
       */
     case LiveStream(path: DataPath[_]) =>
-      log.debug("Live stream request {}", path)
+      log.info("Live stream request {}", path)
       if (!localDataSourceActors.isDefinedAt(path.source)) {
+        log.warning("No live stream available at {}", path)
         sender ! None
       } else {
         def buildSrc[T](implicit fmt: DeltaFmtJson[T]) = for {
-          srcOpt: Option[Source[T, NotUsed]] <-
-            (localDataSourceActors(path.source) ? StreamLiveData(path))
-              .mapTo[Option[Source[T, NotUsed]]]
-          rspFutOpt: Option[Future[Option[StreamResponse[T]]]] =
-            srcOpt.map(x => StreamResponse.build(x, sender).map(Some(_)))
+          srcOpt: Option[Source[T, NotUsed]] <- (localDataSourceActors(path.source) ? StreamLiveData(path)).mapTo[Option[Source[T, NotUsed]]]
+          rspFutOpt: Option[Future[Option[StreamResponse[T]]]] = srcOpt.map(x => StreamResponse.build(x, sender).map(Some(_)))
           rspOpt <- rspFutOpt.getOrElse(Future.successful(None))
         } yield rspOpt
-        log.debug("Building live stream {}", path)
+        log.info("Building live stream {}", path)
         buildSrc(DeltaFmt.formats(path.datatype)) pipeTo sender
       }
 
