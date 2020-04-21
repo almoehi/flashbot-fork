@@ -20,4 +20,8 @@ object MapUtil {
   def hashMap2d[K, V]: java.util.HashMap[K, java.util.HashMap[K, V]] =
     new java.util.HashMap[K, java.util.HashMap[K, V]]()
 
+
+  def fromDebox[K, V](map: debox.Map[K, V]): Map[K, V] = map.iterator.toMap
+
+  def fromDebox[K](buf: debox.Buffer[K]): Iterable[K] = buf.elems
 }
