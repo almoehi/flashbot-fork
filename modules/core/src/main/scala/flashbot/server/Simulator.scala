@@ -87,13 +87,20 @@ class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) ex
         * and therefore doesn't need to be pessimistic.
         */
       case trade: Trade =>
-        val book = myOrders.get(md.path.topic)
+        val book = Some(myOrders.get(md.path.topic)).filter(_ != null) match {
+          case Some(b) => b
+          case _ =>
+            val b = OrderBook.apply(base.params.tickSize(md.path.topic))
+            myOrders.put(md.path.topic, b)
+            b
+        }
+
         val isDepthMatching = depths.containsKey(md.path.topic)
         if (isDepthMatching) {
         } else {
           val quoteSide = if (trade.direction == Up) Ask else Bid
           val bookSide = book.sideOf(quoteSide)
-          while (quoteSide.isBetter(bookSide.bestPrice, trade.price)) {
+          while (!bookSide.isEmpty && quoteSide.isBetter(bookSide.bestPrice, trade.price)) {
             // Match all orders at the best price in our book.
             bookSide.matchMutable(quoteSide, bookSide.bestPrice, Double.MaxValue)
             var i = -1
