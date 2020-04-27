@@ -96,7 +96,7 @@ class TradingEngine(engineId: String,
 
   // Start the Grafana data source server if the dataSourcePort is defined.
   if (grafana.dataSource) {
-    Http().bindAndHandle(GrafanaServer.routes(new FlashbotClient(self, skipTouch = true)),
+    Http().bindAndHandle(GrafanaServer.routes(new FlashbotClient(self, skipTouch = true), grafana.requestTimeout.getOrElse(60 seconds)),
       "localhost", grafana.dataSourcePort, log = log)
   }
 
@@ -463,7 +463,7 @@ class TradingEngine(engineId: String,
             case PriceQuery(path, range, interval) =>
               for {
               index <- (dataServer ? MarketDataIndexQuery).mapTo[Map[Long, DataPath[Any]]]
-              _ = {log.info(s"BundleIndex: $index")}
+              _ = {log.debug(s"BundleIndex: $index")}
 
               candlePath = path.withType(CandlesType(interval))
               exactMatch = index.values.collectFirst {
