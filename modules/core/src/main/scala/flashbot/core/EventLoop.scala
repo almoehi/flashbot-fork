@@ -1,8 +1,9 @@
 package flashbot.core
 
 import debox.Buffer
-import it.unimi.dsi.fastutil.longs.{Long2ObjectOpenHashMap, LongHeapPriorityQueue}
+import it.unimi.dsi.fastutil.longs.{Long2ObjectOpenHashMap, LongComparators, LongHeapPriorityQueue}
 import spire.syntax.cfor._
+import spire.algebra.Order
 
 class EventBuffer(initialCapacity: Int) {
   lazy val buffer: Buffer[Tick] = debox.Buffer.fill[Tick](initialCapacity)(null)
@@ -26,6 +27,7 @@ class EventBuffer(initialCapacity: Int) {
     }
     size = 0
   }
+
 }
 
 /**
@@ -39,7 +41,7 @@ class EventLoop {
   // Buffer management
   private var bufferPool: List[EventBuffer] = List.fill(100)(new EventBuffer(100))
   private val eventQueues: Long2ObjectOpenHashMap[EventBuffer] = new Long2ObjectOpenHashMap[EventBuffer]()
-  private val heap: LongHeapPriorityQueue = new LongHeapPriorityQueue()
+  private val heap: LongHeapPriorityQueue = new LongHeapPriorityQueue(LongComparators.NATURAL_COMPARATOR)
 
   private var collector = new EventBuffer(1000)
   private var collectorRegister = new EventBuffer(1000)
@@ -47,7 +49,7 @@ class EventLoop {
 
   // Top level function to run the event queue until a given time.
   def run(untilMicros: Long, fn: Tick => Unit): Unit = {
-    assert(untilMicros >= currentMicros)
+    assert(untilMicros >= currentMicros, s"$untilMicros >= $currentMicros")
     assert(eventStream == null)
 
     // Load and run the eventStream until the last loaded stream is null.
@@ -94,6 +96,10 @@ class EventLoop {
       val m = currentMicros + delayMicros
       val queue = if (eventQueues.containsKey(m)) eventQueues.get(m) else acquireBuffer()
       queue += tick
+
+      if (m < heap.firstLong())
+        heap.enqueue(m)
+
     } else {
       throw new RuntimeException("EventLoop does not accept events from the past.")
     }
