@@ -33,6 +33,9 @@ trait Instrument {
 
   override def toString: String = symbol
 
+  // TODO:
+  // def tickSize: Double
+
   /**
     * The value of one unit of this security/contract in terms of the settlement asset.
     */
