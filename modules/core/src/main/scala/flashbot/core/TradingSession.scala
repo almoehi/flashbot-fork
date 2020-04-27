@@ -315,6 +315,7 @@ class TradingSession(val strategyKey: String,
       case Success(Done) =>
         emitReportEvent(SessionSuccess)
       case Failure(err) =>
+        log.error(err, "TradingSession error")
         emitReportEvent(SessionFailure(ReportError(err)))
     })
 
