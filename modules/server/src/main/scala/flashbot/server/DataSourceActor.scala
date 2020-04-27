@@ -4,6 +4,7 @@ import java.util.concurrent.{ConcurrentHashMap, Executors}
 
 import akka.{Done, NotUsed}
 import akka.actor.{Actor, ActorLogging, ActorRef, PoisonPill, Props}
+import akka.event.Logging.LogLevel
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.pattern.pipe
@@ -22,6 +23,7 @@ import slick.jdbc.TransactionIsolation
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 //import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.JavaConverters._
 import scala.concurrent.blocking
@@ -61,6 +63,7 @@ class DataSourceActor(session: SlickSession,
 
   // Load topics and paths
   val topicsFut = dataSource.discoverTopics(exchangeConfig)
+  // TODO: fetch all available products here ?
   val pathsFut: Future[Set[DataPath[_]]] = topicsFut.map(topics =>
     topics.flatMap(topic => types.map(dt => DataPath(srcKey, topic, DataType.parse(dt).get))))
 
@@ -248,10 +251,10 @@ class DataSourceActor(session: SlickSession,
                               Some(ScanState(micros, seqId, micros, item, None, Some(item)))
                             case (Some(prev), ((micros, item), seqId)) =>
                               val shouldSnapshot =
-                                (micros - prev.lastSnapshotAt) >= SnapshotInterval.toMicros
+                                (micros - prev.lastSnapshotAt) >= ingestConfig.snapshotInterval.toMicros
                               Some(ScanState(
                                   if (shouldSnapshot) micros else prev.lastSnapshotAt,
-                                  seqId, micros, item, Some(fmt.diff(prev.item, item)),
+                                  seqId, micros, item, Try(fmt.diff(prev.item, item)).toOption,
                                   if (shouldSnapshot) Some(item) else None
                                 )
                               )
@@ -283,8 +286,12 @@ class DataSourceActor(session: SlickSession,
                                   .delete
                               } yield (a, b, ds, dd)).transactionally)
 
-                              _ = log.debug("Saved {} deltas and {} snapshots for {}", a, b, path)
-                              _ = log.debug("Deleted {} deltas and {} snapshots for {}", dd, ds, path)
+                              _ = {
+                                b.filter(_ > 0).map(log.debug("Saved {} snapshots for {}", _, path))
+                                Some(ds).filter(_ > 0).map(log.debug("Deleted {} snapshots for {}", _, path))
+                              }
+                              //_ = log.debug("Saved {} deltas and {} snapshots for {}", a, b, path)
+                              //_ = log.debug("Deleted {} deltas and {} snapshots for {}", dd, ds, path)
                             } yield states.last.seqId
                           }
                           // Clear ingested items from buffer.
@@ -376,6 +383,4 @@ object DataSourceActor {
 
 //  case class DataBundle(path: DataPath, bundleId: Long, begin: Long, end: Option[Long])
 
-  // How often to save a snapshot to the db.
-  val SnapshotInterval = 4 hours
 }
