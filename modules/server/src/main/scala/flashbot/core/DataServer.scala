@@ -2,10 +2,11 @@ package flashbot.core
 
 import java.time.Instant
 
-import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props, RootActorPath}
+import akka.actor.SupervisorStrategy.{Restart, Resume}
+import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, OneForOneStrategy, Props, RootActorPath}
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member}
-import akka.pattern.{Backoff, BackoffSupervisor, ask, pipe}
+import akka.pattern.{Backoff, BackoffOpts, BackoffSupervisor, ask, pipe}
 import akka.stream.alpakka.slick.scaladsl._
 import akka.stream.scaladsl.{Sink, Source}
 import akka.util.Timeout
@@ -116,9 +117,26 @@ class DataServer(dbConfig: Config,
 
   def activeSources: Set[String] = ingestConfig.filterSources(configs.keySet)
 
-  // Map of child DataSourceActors that this DataServer supervises.
-  var localDataSourceActors: Map[String, ActorRef] = activeSources.map { key =>
+
+  def startDataSource(key: String) = {
+
+
+    val childProp = Props(new DataSourceActor(slickSession, key, configs(key), exchangeConfigs.get(key), ingestConfig))
+
+    // achild should restart on stop AND when throwing any exception
+    val backoffOpts = BackoffOpts.onFailure(childProp, key, minBackoff = 1 microsecond, maxBackoff = 30 seconds, randomFactor = 0.2)
+      .withMaxNrOfRetries(5)
+      .withAutoReset(30 seconds)
+      /*
+      .withSupervisorStrategy(OneForOneStrategy(maxNrOfRetries = 5, withinTimeRange = 60 seconds, loggingEnabled = true) {
+        //case _: ArithmeticException => Resume
+        //case _: NullPointerException => Restart
+        //case _: IllegalArgumentException => Stop
+        case _: Exception => Restart //Escalate
+      })*/
+
     // Create child DataSource actor with custom back-off supervision.
+    /*
     val props = BackoffSupervisor.props(Backoff.onFailure(
       Props(new DataSourceActor(
         slickSession, key, configs(key), exchangeConfigs.get(key), ingestConfig)),
@@ -128,13 +146,18 @@ class DataServer(dbConfig: Config,
       randomFactor = 0.2,
       maxNrOfRetries = 60
     ).withAutoReset(30 seconds))
+    */
 
     // When/if the supervisor stops, we should alert.
+    val props = BackoffSupervisor.props(backoffOpts)
     val ref = context.actorOf(props, key)
     context.watchWith(ref, DataSourceSupervisorTerminated(key))
 
-    key -> ref
-  }.toMap
+    (key,ref)
+  }
+
+  // Map of child DataSourceActors that this DataServer supervises.
+  var localDataSourceActors: Map[String, ActorRef] = activeSources.map(startDataSource(_)).toMap
 
   var remoteDataServers = Map.empty[ActorPath, ActorRef]
 
@@ -192,6 +215,11 @@ class DataServer(dbConfig: Config,
               searchForLiveStream[T](path, self :: remoteDataServers.values.toList)
                 .flatMap(_.toFut(LiveDataNotFound(path)))
                 .map(_.toSource)
+                .recover {
+                  case t:Throwable =>
+                    log.error(t, s"No live stream available {}", path)
+                    Source.empty[MarketData[T]]
+                }
 
             // If it's not a polling request, we use an empty stream instead.
             case (_, _, _) => Future.successful(Source.empty)
@@ -204,16 +232,21 @@ class DataServer(dbConfig: Config,
             // If `from` is none, the historical part of the stream is empty.
             .getOrElse[Future[Source[MarketData[T], NotUsed]]](Future.successful(Source.empty))
 
-          _ = { log.info("Built historical stream {}", path) }
+          _ = { log.info("Built historical stream {} {}", path, historical) }
 
-          joined = historical.concat(live).via(dropUnordered(MarketData.orderBySequence[T]))
+          joined = historical.concat(live).via(dropUnordered(MarketData.orderBySequence[T])) //.alsoTo(Sink.foreach(println))
 
         } yield takeLimit match {
           case TakeFirst(limit) => joined.take(limit)
           case _ => joined
         }
 
-        src.flatMap(StreamResponse.build[MarketData[T]](_, sender))
+        src.recover{
+          case t:DataNotFound[T] => throw t
+          case t:Throwable =>
+            log.error(t, s"Failed to build DataStreamSource for $anyPath")
+            Source.empty[MarketData[T]]
+        }.flatMap(StreamResponse.build[MarketData[T]](_, sender))
       }
 
       buildRsp(anyPath) pipeTo sender
@@ -260,6 +293,7 @@ class DataServer(dbConfig: Config,
     case DataSourceSupervisorTerminated(key) =>
       localDataSourceActors -= key
       log.error(s"The $key DataSource has been stopped!")
+      // try to restart the DataSource
   }
 
   /**
@@ -283,8 +317,8 @@ class DataServer(dbConfig: Config,
     implicit val fmt: DeltaFmtJson[T] = path.fmt
     import scala.collection.mutable
 
-    val lookbackFromMicros = fromMicros - DataSourceActor.SnapshotInterval.toMicros
-    log.debug("Building historical stream")
+    val lookbackFromMicros = fromMicros - ingestConfig.snapshotInterval.toMicros
+    log.debug("Building historical stream {} from={} to={}", path, Instant.ofEpochMilli(fromMicros), Instant.ofEpochMilli(toMicros))
 
     val snapshots = Slick.source(
       Snapshots.forPath(path)
@@ -306,17 +340,15 @@ class DataServer(dbConfig: Config,
         * Base case.
         */
       case (None, wrap) if wrap.isSnap =>
-        Some(BaseMarketData(
-          decode[T](wrap.data)(fmt.modelDe).right.get,
-          path, wrap.micros, wrap.bundle, wrap.seqid))
+        val dec = decode[T](wrap.data)(fmt.modelDe).right.get
+        Some(BaseMarketData(dec, path, wrap.micros, wrap.bundle, wrap.seqid))
 
       /**
         * If it's a snapshot from this or a later bundle, use its value.
         */
       case (Some(md), wrap) if wrap.isSnap && wrap.bundle >= md.bundle =>
-        Some(BaseMarketData(
-          decode[T](wrap.data)(fmt.modelDe).right.get,
-          path, wrap.micros, wrap.bundle, wrap.seqid))
+        val snap = decode[T](wrap.data)(fmt.modelDe).right.get
+        Some(BaseMarketData(snap, path, wrap.micros, wrap.bundle, wrap.seqid))
 
       /**
         * If it's a snapshot from an outdated bundle, ignore.
@@ -331,8 +363,7 @@ class DataServer(dbConfig: Config,
       /**
         * Delta has effect if it's the same bundle and next sequence id.
         */
-      case (Some(md: MarketData[_]), wrap)
-        if !wrap.isSnap && wrap.bundle == md.bundle && wrap.seqid == md.seqid + 1 =>
+      case (Some(md: MarketData[_]), wrap) if !wrap.isSnap && wrap.bundle == md.bundle && wrap.seqid == md.seqid + 1 =>
         val delta = decode[fmt.D](wrap.data)(fmt.deltaDe).right.get
         Some(BaseMarketData(fmt.update(md.data, delta),
           md.path, wrap.micros, wrap.bundle, wrap.seqid))
@@ -344,7 +375,9 @@ class DataServer(dbConfig: Config,
     }
       .collect { case Some(value) => value }
       .via(deDupeBy(md => (md.bundle, md.seqid)))
+      //.alsoTo(Sink.foreach(el => println(s"historical: $el")))
       .dropWhile(_.micros < fromMicros)
+      //.alsoTo(Sink.foreach(el => println(s"historical filtered: $el")))
 
     takeLimit match {
       /**
@@ -397,6 +430,11 @@ class DataServer(dbConfig: Config,
         .mapTo[Option[StreamResponse[MarketData[T]]]]
       ret <- if (rspOpt.isDefined) Future.successful(rspOpt)
         else searchForLiveStream[T](path, rest)
-    } yield ret
+    } yield ret match {
+      case Some(src) =>
+        log.info(s"Built live stream {} {}", path, src)
+        Some(src)
+      case _ => None
+    }
   }
 }

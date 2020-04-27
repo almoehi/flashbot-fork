@@ -7,6 +7,7 @@ import akka.pattern.{ask, pipe}
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
 import akka.{Done, NotUsed}
+import com.typesafe.scalalogging.Logger
 import flashbot.client.FlashbotClient._
 import flashbot.core.DataType.{LadderType, OrderBookType}
 import flashbot.core.FlashbotConfig.BotConfig
@@ -36,6 +37,8 @@ import scala.reflect.ClassTag
   *                  the time the constructor returns.
   */
 class FlashbotClient(engine: ActorRef, skipTouch: Boolean = false) {
+
+  protected val log = Logger.apply(this.getClass)
 
   /**
     * Alternative constructor for when the ActorRef is not available. This blocks on a ping
@@ -163,7 +166,11 @@ class FlashbotClient(engine: ActorRef, skipTouch: Boolean = false) {
   implicit class RecoverOps[T](future: Future[Source[MarketData[T], NotUsed]]) {
 
     def recoverNotFound(fut: =>Future[Source[MarketData[T], NotUsed]]): Future[Source[MarketData[T], NotUsed]] =
-      future.recoverWith { case err: DataNotFound[T] => fut }
+      future.recoverWith {
+        case err: DataNotFound[T] =>
+          log.error("DataNotFound", err)
+          fut
+      }
 
     // TODO: Implement this fully
     def recoverLadder(path: DataPath[T],
@@ -178,21 +185,26 @@ class FlashbotClient(engine: ActorRef, skipTouch: Boolean = false) {
               var lastUpdate = md.data.getLastUpdate
               if (ladder.isEmpty || lastUpdate.isEmpty) {
                 ladder = Some(Ladder.fromOrderBook(10, md.data))
-
               } else if (lastUpdate.nonEmpty) {
                 md.data.getLastUpdate match {
                   case Some(ev: OrderBook.Open) =>
                     ladder.get.qtyAtPrice(ev.price)
-//                    ladder.get.updateLevel(md.data.quoteSideOfPrice(ev.price), ev.price, ev.)
+                    try {
+                      ladder.get.updateLevel(md.data.quoteSideOfPrice(ev.price), ev.price, ev.size)
+                    } catch {
+                      case t:Throwable => log.error("Ladder update failed", t)
+                    }
                   case Some(ev: OrderBook.Done) =>
                   case Some(ev: OrderBook.Change) =>
+                  case other => log.warn(s"$other")
                 }
 //                ladder.get.updateLevel()
               }
-              List(md.withData[T](ladder.asInstanceOf[T], ladderType))
+              assert(ladder.isDefined)
+              List(md.withData[T](ladder.get.asInstanceOf[T], ladderType))
             }
           })))
-        case _ => future
+        case other => future
       }
   }
 }

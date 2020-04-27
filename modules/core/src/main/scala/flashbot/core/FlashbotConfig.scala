@@ -34,7 +34,7 @@ object FlashbotConfig {
   val DefaultTTL: FiniteDuration = 0 seconds
 
   @ConfiguredJsonCodec(decodeOnly = true)
-  case class IngestConfig(enabled: Seq[String], backfill: Seq[String], retention: Seq[Seq[String]]) {
+  case class IngestConfig(enabled: Seq[String], backfill: Seq[String], retention: Seq[Seq[String]], snapshotInterval: FiniteDuration = 4 hours) {
     def ingestMatchers: Set[DataPath[Any]] = enabled.toSet.map(DataPath.parse)
     def backfillMatchers: Set[DataPath[Any]] = backfill.toSet.map(DataPath.parse)
 
@@ -74,7 +74,7 @@ object FlashbotConfig {
 
   @ConfiguredJsonCodec(decodeOnly = true)
   case class GrafanaConfig(dataSource: Boolean, dataSourcePort: Int,
-                           host: String, apiKey: Option[String])
+                           host: String, apiKey: Option[String], requestTimeout: Option[FiniteDuration] = Some((60 seconds)))
 
   @ConfiguredJsonCodec(decodeOnly = true)
   case class DataSourceConfig(`class`: String, datatypes: Option[Seq[String]])
