@@ -18,7 +18,7 @@ import flashbot.util.time.TimeFmt
 import flashbot.util.stream._
 import flashbot.util
 import io.circe.generic.JsonCodec
-import io.circe.{Json, Printer}
+import io.circe.{Json, JsonObject, Printer}
 import io.circe.parser._
 import io.circe.literal._
 import io.circe.syntax._
@@ -35,11 +35,50 @@ import flashbot.util.network.RequestService._
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.concurrent.duration._
 import scala.language.postfixOps
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 class CoinbaseMarketDataSource extends DataSource {
 
   import CoinbaseMarketDataSource._
+
+  val products = debox.Map.empty[String,CoinbaseProduct]
+
+  val defaultTickSize = 0.01
+
+  private def fetchProducts()(implicit ctx: ActorContext, mat: ActorMaterializer) = {
+    implicit val ec: ExecutionContext = ctx.dispatcher
+    val log = ctx.system.log
+    val timeout = 10 seconds
+    var uri = uri"https://api.pro.coinbase.com/products"
+
+    log.debug(s"Fetching /products infor from $uri")
+
+    sttp.get(uri).sendWithRetries().flatMap { rsp =>
+      rsp.body match {
+        case Left(err) => Future.failed(new RuntimeException(s"Error in Coinbase /products request: $err"))
+        case Right(bodyStr) => Future.fromTry(decode[Seq[CoinbaseProduct]](bodyStr).toTry)
+      }
+    } onComplete {
+      case Success(xs) =>
+        log.info(s"Loaded /products information $xs")
+        xs.map{p =>
+          products(CurrencyPair(p.id).symbol) = p
+        }
+      case Failure(err) =>
+        log.error(err, "Failed to fetch /products information")
+    }
+  }
+
+  private def subscribeMessageJson(channels: Set[String], cbProducts: Set[String]) = {
+    import io.circe.syntax._
+
+    val validChannels = channels.filter(c => CoinbaseMarketDataSource.ChannelTypes.contains(c)).toSeq
+
+    Map("type" -> "subscribe".asJson, "channels" -> validChannels.map{
+      case CoinbaseMarketDataSource.Status => Map("name" -> CoinbaseMarketDataSource.Status.asJson).asJson
+      case other => Map("name" -> other.asJson, "product_ids" -> cbProducts.asJson).asJson
+    }.asJson).asJson
+  }
 
   override def scheduleIngest(topics: Set[String], dataType: String) = {
     IngestGroup(topics, 0 seconds)
@@ -53,6 +92,12 @@ class CoinbaseMarketDataSource extends DataSource {
     implicit val ec: ExecutionContext = ctx.dispatcher
 
     val log = ctx.system.log
+
+    if (products.isEmpty) {
+      fetchProducts()
+    }
+
+
     log.debug("Starting ingest group {}, {}", topics, datatype)
 
     val (jsonRef, jsonSrc) = Source
@@ -61,9 +106,25 @@ class CoinbaseMarketDataSource extends DataSource {
       .dropWhile(eventType(_) != Subscribed)
       .preMaterialize()
 
-    class FullChannelClient(uri: URI) extends WebSocketClient(uri) {
+    class FullChannelClient(uri: URI, retries: Int = 5) extends WebSocketClient(uri) {
+
+      var subscribeMessages: Set[String] = Set.empty
+      var subscribed: Map[String,Boolean] = Map.empty
+      var attempts: Int = 0
+
+      def subscribeTo(msg: String): Unit = {
+        log.debug("Sending subscribe message: {}", msg)
+        subscribeMessages = subscribeMessages + msg
+        this.send(msg)
+      }
+
       override def onOpen(handshakedata: ServerHandshake) = {
         log.info("Coinbase WebSocket open")
+
+        // this is a re-connect - try to reestablish previous subscriptions
+        if (attempts > 0 && attempts <= retries) {
+          subscribeMessages.map(subscribeTo(_))
+        }
       }
 
       override def onMessage(message: String) = {
@@ -71,23 +132,74 @@ class CoinbaseMarketDataSource extends DataSource {
           case Left(err) =>
             log.error(err.underlying, "Parsing error in Coinbase Pro Websocket: {}", err.message)
             jsonRef ! PoisonPill
+            /*
+          case Right(jsonValue) if (eventType(jsonValue) == Heartbeat) =>
+            // TODO: check for missed messages via last_trade_id and sequence ???
+            val hb = jsonValue.as[CoinbaseHeartbeat].right.get
+            //log.info("Coinbase Pro Websocket hearbeat {}", hb)
+            jsonRef ! jsonValue
           case Right(jsonValue) if (eventType(jsonValue) == Error) =>
             val errorObj = jsonValue.as[CoinbaseError].right.get
             log.error("Coinbase Pro Websocket error {}", errorObj)
             jsonRef ! jsonValue
-          case Right(jsonValue) =>
+             */
+          case Right(jsonValue) => eventType(jsonValue) match {
+              case Error =>
+                val errorObj = jsonValue.as[CoinbaseError].right.get
+                log.error("Coinbase Pro Websocket error {}", errorObj)
+              case Heartbeat =>
+              case Subscribed =>
+                val obj = jsonValue.as[CoinbaseSubscriptions].right.get
+                subscribed = subscribed ++ obj.channels.map(c => (c.name,true)).toMap
+                log.info("Coinbase Pro Websocket subscribed to {}", obj)
+              case _ => // Ignore
+            }
+
+            if (attempts > 0 && subscribed.size == subscribeMessages.size) {
+              attempts = 0
+            }
+
+            /*
+            if (subscribed.size != subscribeMessages) {
+              (subscribeMessages -- subscribed).map(s => subscribeTo(subscribeMessages(s)))
+            }
+             */
+
             jsonRef ! jsonValue
         }
       }
 
       override def onClose(code: Int, reason: String, remote: Boolean) = {
-        log.info("Coinbase WebSocket closed")
-        jsonRef ! PoisonPill
+        log.info("Coinbase WebSocket closed  code={} reason={}, remote={} - reconnecting ...", code, reason, remote)
+        subscribed = Map.empty
+
+        if (attempts > retries) {
+          jsonRef ! PoisonPill
+          throw new RuntimeException(s"Coinbase WebSocket closed  code=$code reason=$reason remote=$remote")
+        }
+
+        // try to reconnect
+        attempts += 1
+        Future(blocking {
+          reconnect()
+        })
       }
 
       override def onError(ex: Exception) = {
-        log.error(ex, "Exception in Coinbase Pro WebSocket. Shutting down the stream.")
-        jsonRef ! PoisonPill
+        log.error(ex, "Exception in Coinbase Pro WebSocket. Trying to reconnect ...")
+        subscribed = Map.empty
+
+        if (attempts > retries) {
+          log.error(ex, "Exception in Coinbase Pro WebSocket. Max. retries {} reached, shutting down the stream.", attempts)
+          jsonRef ! PoisonPill
+          throw ex
+        }
+
+        // try to reconnect
+        attempts += 1
+        Future(blocking {
+          reconnect()
+        })
       }
     }
 
@@ -98,7 +210,7 @@ class CoinbaseMarketDataSource extends DataSource {
 
     // Events are sent here as StreamItem instances
     val eventRefs = topics.map(_ ->
-      Source.actorRef[StreamItem](Int.MaxValue, OverflowStrategy.fail).preMaterialize()).toMap
+      Source.actorRef[StreamItem[_]](Int.MaxValue, OverflowStrategy.fail).preMaterialize()).toMap
 
     datatype match {
       case OrderBookType =>
@@ -108,20 +220,24 @@ class CoinbaseMarketDataSource extends DataSource {
             responsePromise.failure(new RuntimeException("Unable to connect to Coinbase Pro WebSocket"))
           }
           val cbProducts: Set[String] = topics.map(toCBProduct)
+          val strMsg = subscribeMessageJson(Set(CoinbaseMarketDataSource.Full), cbProducts).noSpaces
+          /*
           val strMsg = s"""
             {
               "type": "subscribe",
               "channels": [{"name": "full", "product_ids": ${cbProducts.asJson.noSpaces}}]
             }
           """
+           */
           // Send the subscription message
-          log.debug("Sending message: {}", strMsg)
-          client.send(strMsg)
+          client.subscribeTo(strMsg)
         })
 
-        val snapshotPromises = topics.map(_ -> Promise[StreamItem]).toMap
+        val snapshotPromises = topics.map(_ -> Promise[StreamItem[_]]).toMap
 
-        jsonSrc.alsoTo(Sink.foreach { _ =>
+        jsonSrc
+          .filterNot(Heartbeat == eventType(_))
+          .alsoTo(Sink.foreach { _ =>
           if (!responsePromise.isCompleted) {
             // Complete the promise as soon as we have a "subscriptions" event
             responsePromise.success(eventRefs.map {
@@ -131,11 +247,17 @@ class CoinbaseMarketDataSource extends DataSource {
                   .mergeSorted(snapshotSrc)(streamItemOrdering)
                   .via(util.stream.deDupeBy(_.seq))
                   .dropWhile(!_.isBook)
-                  .scan[Option[StreamItem]](None) {
+                  .scan[Option[StreamItem[_]]](None) {
                     case (None, item) if item.isBook => Some(item)
-                    case (Some(memo), item) if !item.isBook => Some(item.copy(data =
-                      Left(OrderBook.Delta.fromOrderEventOpt(item.event)
-                        .foldLeft(memo.book)(_ update _))))
+                    case (Some(memo), item) if !item.isBook => Some(
+                      try {
+                        item.copy(data = OrderBook.Delta.fromOrderEventOpt(item.event).foldLeft(memo.book)(_ update _))
+                      } catch {
+                        case t:Throwable =>
+                          log.error(t, "Failed to update OrderBook using event {}", item.event)
+                          item.copy(data = memo.book)
+                      }
+                    )
                   }
                   .collect { case Some(item) if item.micros != -1 => (item.micros, item.book.asInstanceOf[T]) }
                   .watchTermination()(Keep.right).preMaterialize()
@@ -157,7 +279,9 @@ class CoinbaseMarketDataSource extends DataSource {
                 }
               } onComplete {
                 case Success(snapshot) =>
-                  snapRef.success(StreamItem(snapshot.sequence, -1, Left(snapshot.toOrderBook)))
+                  val tickSize = products.get(topic).map(_.tickSize).getOrElse(defaultTickSize)
+                  // TODO: where to get micros here ?
+                  snapRef.success(StreamItem[OrderBook](snapshot.sequence, -1, snapshot.toOrderBook(tickSize)))
                 case Failure(err) =>
                   snapRef.failure(err)
               }
@@ -167,12 +291,20 @@ class CoinbaseMarketDataSource extends DataSource {
 
         // Drop everything except for book events
         .filter(BookEventTypes contains eventType(_))
-
+        .filter{json =>
+          json.hcursor.get[String]("order_id").toOption.filter(_.nonEmpty) match {
+            case Some(id) if eventType(json) != Match => true
+            case _ if eventType(json) != Match =>
+              log.warning(s"OrderBook event without order_id {}", json)
+              false
+            case _ => true
+          }
+        } // coinbase sometimes sends order event without or empty order_id
         // Map to StreamItem
-        .map[StreamItem] { json =>
+        .map[StreamItem[OrderEvent]] { json =>
           val unparsed = json.as[UnparsedAPIOrderEvent].right.get
           val orderEvent = unparsed.toOrderEvent
-          StreamItem(unparsed.sequence.get, unparsed.micros, Right(orderEvent))
+          StreamItem(unparsed.sequence.get, unparsed.micros, orderEvent)
         }
 
         // Send to event ref
@@ -196,25 +328,29 @@ class CoinbaseMarketDataSource extends DataSource {
             responsePromise.failure(new RuntimeException("Unable to connect to Coinbase Pro WebSocket"))
           }
           val cbProducts: Set[String] = topics.map(toCBProduct)
+          val strMsg = subscribeMessageJson(Set(CoinbaseMarketDataSource.Matches, CoinbaseMarketDataSource.Heartbeat), cbProducts).noSpaces
+          /*
           val strMsg = s"""
             {
               "type": "subscribe",
               "channels": [{"name": "matches", "product_ids": ${cbProducts.asJson.noSpaces}}]
             }
           """
+           */
           // Send the subscription message
-          log.debug("Sending message: {}", strMsg)
-          client.send(strMsg)
+          client.subscribeTo(strMsg)
         })
 
-        jsonSrc.alsoTo(Sink.foreach { json =>
+        jsonSrc
+          .filterNot(Heartbeat == eventType(_))
+          .alsoTo(Sink.foreach { json =>
           // Resolve promise if necessary
           if (!responsePromise.isCompleted) {
             responsePromise.success(eventRefs.map {
               case (topic, (ref, eventSrc)) =>
                 val (done, src) = eventSrc
                   .map {
-                    case StreamItem(seq, micros, Right(om: OrderMatch)) =>
+                    case StreamItem(seq, micros, om: OrderMatch) =>
                       (micros, om.toTrade.asInstanceOf[T])
                   }
                   .watchTermination()(Keep.right)
@@ -232,10 +368,10 @@ class CoinbaseMarketDataSource extends DataSource {
         .filter(BookEventTypes contains eventType(_))
 
         // Map to StreamItem
-        .map[StreamItem] { json =>
+        .map[StreamItem[OrderEvent]] { json =>
           val unparsed = json.as[UnparsedAPIOrderEvent].right.get
           val orderEvent = unparsed.toOrderEvent
-          StreamItem(unparsed.sequence.get, unparsed.micros, Right(orderEvent))
+          StreamItem(unparsed.sequence.get, unparsed.micros, orderEvent)
         }
 
         // Send to event ref
@@ -346,14 +482,22 @@ object CoinbaseMarketDataSource {
 
   def toCBProduct(pair: String): String = pair.toUpperCase.replace("_", "-")
 
-  case class StreamItem(seq: Long, micros: Long, data: Either[OrderBook, OrderEvent]) {
-    def isBook: Boolean = data.isLeft
-    def book: OrderBook = data.left.get
-    def event: OrderEvent = data.right.get
+  trait WithSequence {
+    val seq: Long
   }
 
-  val streamItemOrdering: Ordering[StreamItem] = new Ordering[StreamItem] {
-    override def compare(x: StreamItem, y: StreamItem): Int = {
+  //Either[OrderBook, OrderEvent]
+  case class StreamItem[T](seq: Long, micros: Long, data: T) extends WithSequence {
+    def isBook: Boolean = data.isInstanceOf[OrderBook]
+    def isOrder: Boolean = data.isInstanceOf[OrderEvent]
+    def isHeartbeat: Boolean = data.isInstanceOf[CoinbaseHeartbeat]
+    def book: OrderBook = data.asInstanceOf[OrderBook]
+    def event: OrderEvent = data.asInstanceOf[OrderEvent]
+    def heartbeat: CoinbaseHeartbeat = data.asInstanceOf[CoinbaseHeartbeat]
+  }
+
+  val streamItemOrdering: Ordering[StreamItem[_]] = new Ordering[StreamItem[_]] {
+    override def compare(x: StreamItem[_], y: StreamItem[_]): Int = {
       if (x.seq < y.seq) -1
       else if (x.seq > y.seq) 1
       else if (x.isBook && !y.isBook) -1
@@ -370,7 +514,17 @@ object CoinbaseMarketDataSource {
   val Subscribed = "subscriptions"
   val Error = "error"
 
+  // valid Coinbase Websocket channels to subscribe to
+  val Heartbeat = "heartbeat"
+  val Status = "status"
+  val Trades = "trades"
+  val Matches = "matches"
+  val Full = "full"
+  val Ticker = "ticker"
+
   val BookEventTypes = List(Open, Done, Received, Change, Match)
+
+  val ChannelTypes = List(Heartbeat, Status, Trades, Matches, Full, Ticker)
 
   def eventType(json: Json): String =
     json.hcursor.get[String]("type").right.get
@@ -407,18 +561,20 @@ object CoinbaseMarketDataSource {
     def toOrderEvent: OrderEvent = {
       `type` match {
         case Open =>
+          // TODO: add order-type (market, price==null or limit price = Some())
           OrderOpen(order_id.get, CurrencyPair(product_id), price.get.toDouble, remaining_size.get.toDouble, side.get)
         case Done =>
           OrderDone(order_id.get, CurrencyPair(product_id), side.get,
-            DoneReason.parse(reason.get), price.map(_.toDouble), remaining_size.map(_.toDouble))
+            DoneReason.parse(reason.get), price.flatMap(d => Try(d.toDouble).toOption), remaining_size.flatMap(d => Try(d.toDouble).toOption))
         case Change =>
-          OrderChange(order_id.get, CurrencyPair(product_id), price.map(_.toDouble), new_size.get.toDouble)
+          // TODO: add order-type (market, price==null or limit price = Some())
+          OrderChange(order_id.get, CurrencyPair(product_id), price.flatMap(d => Try(d.toDouble).toOption), new_size.get.toDouble)
         case Match =>
           OrderMatch(trade_id.get.toString, CurrencyPair(product_id), micros, size.get.toDouble, price.get.toDouble,
             TickDirection.ofMakerSide(side.get), maker_order_id.get, taker_order_id.get)
         case Received =>
-          OrderReceived(order_id.get, CurrencyPair(product_id), client_oid.get,
-            OrderType.parseOrderType(order_type.get))
+          // TODO: add 'funds' field
+          OrderReceived(order_id.get, CurrencyPair(product_id), client_oid.get, OrderType.parseOrderType(order_type.get))
       }
     }
 
@@ -441,14 +597,37 @@ object CoinbaseMarketDataSource {
 
   @JsonCodec case class CoinbaseError(`type`: String, message: String)
 
+  @JsonCodec case class CoinbaseChannel(name: String, product_ids: Seq[String])
+
+  @JsonCodec case class CoinbaseSubscriptions(`type`: String, channels: Seq[CoinbaseChannel])
+
+  /*
+      {
+        "id": "BTC-USD",
+        "base_currency": "BTC",
+        "quote_currency": "USD",
+        "base_min_size": "0.001",
+        "base_max_size": "10000.00",
+        "quote_increment": "0.01" ==> tickSize
+    }
+   */
+  @JsonCodec case class CoinbaseProduct(id: String, base_currency: String, quote_currency: String, base_min_size: Double, base_max_size: Double, quote_increment: Double) {
+    lazy val tickSize = quote_increment
+  }
+
+  @JsonCodec case class CoinbaseHeartbeat(`type`: String, sequence: Long, last_trade_id: Long, product_id: String, time: String) {
+    implicit def toStreamItem: StreamItem[CoinbaseHeartbeat] = StreamItem(sequence, TimeFmt.ISO8601ToMicros(time), this)
+    lazy val micros = TimeFmt.ISO8601ToMicros(time)
+    lazy val product = CurrencyPair(product_id)
+  }
+
   @JsonCodec case class BackfillCursor(cbAfter: String, lastItemId: String)
 
 
   @JsonCodec case class BookSnapshot(sequence: Long,
-                                     tickSize: Double,
                                      asks: Seq[(String, String, String)],
                                      bids: Seq[(String, String, String)]) {
-    def toOrderBook: OrderBook = {
+    def toOrderBook(tickSize: Double): OrderBook = {
       val withAsks = asks.foldLeft(new OrderBook(tickSize)) {
         case (book, askSeq) => book.open(askSeq._3, askSeq._1.toDouble, askSeq._2.toDouble, Sell)
       }
