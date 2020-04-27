@@ -134,8 +134,11 @@ class OrderBook(val tickSize: Double,
 //  protected def _change(id: String, newSize: Num): OrderBook = update(Change(id, newSize))
 
   def open(order: Order): OrderBook = {
-    if (orders.containsKey(order.id))
-      throw new RuntimeException(s"OrderBook already contains order ${order.id}")
+    if (orders.containsKey(order.id) && orders.get(order.id).equals(order)) {
+      // ignore "Open" messages for identical orders already in the book
+      return this
+      //throw new RuntimeException(s"OrderBook already contains order ${order.id}")
+    }
 
     // Update the index first.
     orders.put(order.id, order)
@@ -185,7 +188,12 @@ class OrderBook(val tickSize: Double,
 
   def change(id: String, newSize: Double): OrderBook = {
     // Must be a valid order
-    orders(id).setAmount(newSize)
+    assert(id != null)
+    //assert(orders.containsKey(id))
+    if (orders.containsKey(id))
+      orders(id).setAmount(newSize)
+
+    // ignore "Change" messages for orders not in the book
     this
   }
 
