@@ -16,7 +16,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.{Failure, Random, Success}
 
-class RetentionService(path: DataPath[Any], retention: Option[FiniteDuration], tickRate: Int)
+class RetentionService(path: DataPath[Any], retention: Option[FiniteDuration], tickRate: Double)
                       (implicit session: SlickSession) extends Actor with ActorLogging {
   import session.profile.api._
 
@@ -29,9 +29,9 @@ class RetentionService(path: DataPath[Any], retention: Option[FiniteDuration], t
   val random = new Random()
 
   // Retention ticks
-  system.scheduler.schedule(0 millis, (10 seconds) / tickRate)(Future {
+  system.scheduler.schedule(0 millis, ((10/tickRate) seconds))(Future {
     blocking {
-      Thread.sleep(random.nextInt(5000 / tickRate))
+      Thread.sleep(random.nextInt(Math.round(5000 / tickRate).toInt))
       self ! RetentionTick
     }
   })
