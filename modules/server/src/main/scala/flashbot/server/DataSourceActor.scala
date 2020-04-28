@@ -215,7 +215,7 @@ class DataSourceActor(session: SlickSession,
                         // that's older than the retention period.
                         if (ingestConfig.backfillMatchers.exists(_.matches(path))) {
                           log.info(s"Launching BackfillService for {}", path)
-                          context.actorOf(Props(new BackfillService(backfillBundleId, path, dataSource)))
+                          context.actorOf(Props(new BackfillService(backfillBundleId, path, dataSource, ingestConfig.backfillPeriodFor(path))))
                         } else {
                           log.debug("Skipping backfill for {}", path)
                         }
