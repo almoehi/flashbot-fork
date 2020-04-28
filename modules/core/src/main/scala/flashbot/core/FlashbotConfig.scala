@@ -1,5 +1,7 @@
 package flashbot.core
 
+import java.time.Instant
+
 import com.typesafe.config.{Config, ConfigFactory}
 import flashbot.models._
 import flashbot.util.time
@@ -34,9 +36,14 @@ object FlashbotConfig {
   val DefaultTTL: FiniteDuration = 0 seconds
 
   @ConfiguredJsonCodec(decodeOnly = true)
-  case class IngestConfig(enabled: Seq[String], backfill: Seq[String], retention: Seq[Seq[String]], snapshotInterval: FiniteDuration = 4 hours) {
+  case class IngestConfig(enabled: Seq[String], backfill: Seq[Seq[String]], retention: Seq[Seq[String]], snapshotInterval: FiniteDuration = 4 hours) {
     def ingestMatchers: Set[DataPath[Any]] = enabled.toSet.map(DataPath.parse)
-    def backfillMatchers: Set[DataPath[Any]] = backfill.toSet.map(DataPath.parse)
+    def backfillMatchers: Set[DataPath[Any]] = backfill.filter(_.nonEmpty).map(_.head).toSet.map(DataPath.parse)
+
+    def backfillPeriodFor(path: DataPath[_]): Option[Instant] = {
+      backfill.filter(_.nonEmpty).find(record => DataPath(record.head).matches(path)).filter(_.size > 1).filter(_.last != "*")
+        .map(record => time.parseDuration(record.last)).map(dt => Instant.now().minusSeconds(dt.toSeconds))
+    }
 
     def filterIngestSources(sources: Set[String]): Set[String] = sources.filter(src =>
       ingestMatchers.exists(_.matches(s"$src/*/*")))
