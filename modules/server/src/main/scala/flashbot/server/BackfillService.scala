@@ -10,6 +10,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.alpakka.slick.javadsl.SlickSession
 import flashbot.core.DataSource
 import flashbot.util.stream._
+import flashbot.util.time._
 import flashbot.db._
 import flashbot.core.DeltaFmtJson
 import flashbot.models.DataPath
@@ -44,7 +45,7 @@ import scala.util.{Failure, Random, Success}
   *      columns according to whether the persistence function said this backfill is complete.
   *   5. Schedule the next tick.
   */
-class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSource)
+class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSource, backfillStopAt: Option[Instant] = None)
                         (implicit session: SlickSession) extends Actor with ActorLogging {
   import session.profile.api._
 
@@ -68,13 +69,13 @@ class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSour
     Backfills +=
       BackfillRow(bundleId, path.source, path.topic, path.datatype, None,
         Some(Timestamp.from(Instant.EPOCH)), None, None)), 5 seconds)
-  if (insertedBackfills == 0) {
-    throw new RuntimeException(s"Unable to create backfill row $bundleId")
+    if (insertedBackfills == 0) {
+      throw new RuntimeException(s"Unable to create backfill row $bundleId")
   }
 
   def scheduleNextTick(): Unit = {
-    system.scheduler.scheduleOnce(((2 seconds) +
-      (random.nextInt(5000) millis)) / tickRate)(self ! BackfillTick)
+    system.scheduler.scheduleOnce((((2/tickRate) seconds) +
+      (random.nextInt(5000) millis)))(self ! BackfillTick)
   }
   self ! BackfillTick
 
@@ -146,7 +147,7 @@ class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSour
     implicit val itemEn = fmt.modelEn
     implicit val deltaEn = fmt.deltaEn
 
-    log.debug("Running backfill page for {}", path)
+    log.debug("Running backfill page for {} (backfillStopAt={})", path, backfillStopAt)
 
     def proceed(claim: BackfillRow, res: (Vector[(Long, T)], Option[(String, FiniteDuration)])) =
       res match {
@@ -184,7 +185,7 @@ class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSour
             seqIdBound = earliestSeqIdOpt.getOrElse(0L)
             seqIdStart: Long = seqIdBound - data.size
 
-            _ = log.debug(s"Backfill info: path={}, seq bound={}, bundle={}", path, seqIdBound, claim.bundle)
+            _ = log.debug(s"Backfill info: path=$path, seq bound=$seqIdBound, bundle={}, oldestTimestamp={}, backfillStopAt={}", claim.bundle, res._1.map(_._1).min.microsToInstant, backfillStopAt)
 
             // Insert the snapshot
             _ <- data.headOption.map {
@@ -208,9 +209,10 @@ class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSour
               }.toSeq
 
             updatedCount <- (nextCursorOpt, overlapItems) match {
-              // If there is a next cursor AND there are no overlapping items in the current
-              // page, then we can continue backfilling.
-              case (Some((nextCursor, delay)), 0) =>
+              // If there is a next cursor AND there are no overlapping items in the current AND timestamp of oldest item is LARGER as backfillStopAt
+              // page, then we can continue backfilling
+              //
+              case (Some((nextCursor, delay)), 0) if backfillStopAt.map(_.isBefore(res._1.map(_._1).min.microsToInstant)).getOrElse(false) =>
                 claimedBackfill
                   .map(bf => (bf.claimedBy, bf.claimedAt, bf.cursor, bf.nextPageAt))
                   .update(None, None, Some(nextCursor),
@@ -219,7 +221,7 @@ class BackfillService[T](bundleId: Long, path: DataPath[T], dataSource: DataSour
               // If next cursor is None OR there are overlapping items, then the backfill
               // is complete.
               case _ =>
-                log.info(s"Backfill of {} has completed: {}", path, claim)
+                log.info(s"Backfill of {} has completed: {} (oldestTimestamp={}, backfillStopAt={})", path, claim, res._1.map(_._1).min.microsToInstant, backfillStopAt)
                 claimedBackfill
                   .map(bf => (bf.claimedBy, bf.claimedAt, bf.cursor, bf.nextPageAt))
                   .update(None, None, None, None)
