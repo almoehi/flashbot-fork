@@ -74,7 +74,7 @@ class DataSource {
     */
   def types: Seq[DataType[_]] = Seq.empty
 
-  protected[flashbot] def backfillTickRate: Int = 1
+  protected[flashbot] def backfillTickRate: Double = 1d
 }
 
 object DataSource {
