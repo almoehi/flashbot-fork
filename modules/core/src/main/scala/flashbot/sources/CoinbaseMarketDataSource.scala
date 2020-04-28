@@ -45,6 +45,8 @@ class CoinbaseMarketDataSource extends DataSource {
 
   val defaultTickSize = 0.01
 
+  val validCandles = Seq(1 minute, 5 minutes, 15 minutes, 1 hour, 6 hours, 1 day).map(_.toSeconds)
+
   private def fetchProducts()(implicit ctx: ActorContext, mat: ActorMaterializer) = {
     implicit val ec: ExecutionContext = ctx.dispatcher
     val log = ctx.system.log
@@ -79,6 +81,8 @@ class CoinbaseMarketDataSource extends DataSource {
       case other => Map("name" -> other.asJson, "product_ids" -> cbProducts.asJson).asJson
     }.asJson).asJson
   }
+
+  override protected[flashbot] def backfillTickRate: Double = 0.5
 
   override def scheduleIngest(topics: Set[String], dataType: String) = {
     IngestGroup(topics, 0 seconds)
@@ -387,7 +391,7 @@ class CoinbaseMarketDataSource extends DataSource {
           }
         }
 
-      case CandlesType(d: FiniteDuration) if d == 1.minute =>
+      case CandlesType(d: FiniteDuration) if validCandles.contains(d.toSeconds) =>
         responsePromise.completeWith(for {
           srcMap <- ingestGroup(topics, TradesType).map(_.map {
             case (topic, src) =>
@@ -443,7 +447,7 @@ class CoinbaseMarketDataSource extends DataSource {
         }
       }
 
-    case CandlesType(d) if d == 1.minute =>
+    case CandlesType(d) if validCandles.contains(d.toSeconds) =>
       implicit val ec: ExecutionContext = ctx.dispatcher
       val product = toCBProduct(topic)
       val now = Instant.now()
@@ -451,8 +455,8 @@ class CoinbaseMarketDataSource extends DataSource {
           Instant.from(DateTimeFormatter.ISO_INSTANT.parse(s)))
         .getOrElse(now)
       val end = DateTimeFormatter.ISO_INSTANT.format(endInstant)
-      val start = DateTimeFormatter.ISO_INSTANT.format(endInstant.minusSeconds(60 * 200))
-      val uri = uri"https://api.pro.coinbase.com/products/$product/candles?start=$start&end=$end&granularity=60"
+      val start = DateTimeFormatter.ISO_INSTANT.format(endInstant.minusSeconds(d.toSeconds * 200))
+      val uri = uri"https://api.pro.coinbase.com/products/$product/candles?start=$start&end=$end&granularity=${d.toSeconds}"
       sttp.get(uri).sendWithRetries().flatMap { rsp =>
         rsp.body match {
           case Left(err) =>
