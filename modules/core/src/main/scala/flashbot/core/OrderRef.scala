@@ -170,13 +170,19 @@ sealed abstract class BuiltInOrder extends OrderRef {
   final lazy val exchange = ctx.exchanges(market.exchange)
   override final lazy val id: String = exchange.genOrderId
 
+  // this is private and seems like never used anywhere
+  // but I guess this should store the ID that references this order on the EXCHANGE AFTER SUBMISSION (e.g. not an auto-generated one)
   private var exchangeId: String = _
 
   override def handleSubmit(): Unit = {
     // Submit the order directly to the exchange.
     exchange.order(submitCmd) onComplete {
 
-      case Success(RequestSuccess) => // Do nothing on success
+      case Success(RequestSuccess(maybeOrderId)) =>
+        // store exchange-generated ID, if available
+        maybeOrderId.map{
+          exchangeId = _
+        }
 
       case Success(RequestError(cause: ExchangeError)) => cause match {
         case err @ OrderRejectedError(request, reason) =>
@@ -194,8 +200,11 @@ sealed abstract class BuiltInOrder extends OrderRef {
 
   override def handleCancel(): Unit = {
     exchange.cancel(exchangeId, ctx.instruments(market)) onComplete {
-      case Success(RequestSuccess) => // Do nothing on success
-
+      case Success(RequestSuccess(maybeOrderId)) =>
+        // store exchange-generated ID, if available and not yet set
+        maybeOrderId.filterNot(_ => exchangeId == null).map{
+          exchangeId = _
+        }
       case Success(RequestError(cause: ExchangeError)) =>
         ctx.emit(CancelError(id, market.symbol, cause))
 
