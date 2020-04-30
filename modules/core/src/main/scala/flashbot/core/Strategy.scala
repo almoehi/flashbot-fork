@@ -50,6 +50,28 @@ abstract class Strategy[P] extends DataHandler {
   def title: String
 
   /**
+    * the default target asset used to compute the portfolio
+    * defaults to USD
+    * @return
+    */
+  def defaultTargetAsset: String = "usd"
+
+  /**
+    * indicate, if this strategy requires fiat rates to be fetched
+    * @return
+    */
+  def requiresFiatRates: Boolean = true
+
+  /**
+    * the time this strategy needs to properly initialize
+    * e.g. during backtest onData will only be called once this warmup duration has elapsed
+    * @return
+    */
+  def requiredWarmupDuration: Duration = Duration.Zero
+
+  private var firstReceivedDataMicros: Long = -1
+
+  /**
     * Generate a self-describing StrategyInfo instance.
     *
     * @param loader an object that can be used to load various types of information about the
@@ -81,14 +103,14 @@ abstract class Strategy[P] extends DataHandler {
     *
     * @param data a single item of market data from any of the subscribed DataPaths.
     */
-  def onData(data: MarketData[_]): Unit
+  def onData(data: MarketData[_])
 
   private var initialPortfolio: Option[Portfolio] = None
   protected val isInitializedMap = new util.WeakHashMap[java.lang.Long, Boolean]()
 
   def getInitialPortfolio()(implicit ctx: TradingSession): Option[Portfolio] =
     initialPortfolio orElse {
-      if (MapUtil.getOrCompute(isInitializedMap, ctx.seqNr, ctx.getPortfolio.isInitialized())) {
+      if (MapUtil.getOrCompute(isInitializedMap, ctx.seqNr, ctx.getPortfolio.isInitialized(defaultTargetAsset))) {
         initialPortfolio = Some(ctx.getPortfolio)
       }
       initialPortfolio
@@ -98,8 +120,15 @@ abstract class Strategy[P] extends DataHandler {
     // Call the side effectful function to ensure initialPortfolio is set.
     getInitialPortfolio()
 
-    // Invoke the actual user `handleData` method.
-    onData(data)
+    if (firstReceivedDataMicros < 0) {
+      firstReceivedDataMicros = data.micros
+    }
+
+    // wait for requiredWarmupDuration to be elapsed
+    if (requiredWarmupDuration == Duration.Zero || ((data.micros - firstReceivedDataMicros) - requiredWarmupDuration.toMicros) >= 0) {
+      // Invoke the actual user `handleData` method.
+      onData(data)
+    }
   }
 
   /**
