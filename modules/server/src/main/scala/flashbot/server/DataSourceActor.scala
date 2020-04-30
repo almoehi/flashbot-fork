@@ -56,6 +56,8 @@ class DataSourceActor(session: SlickSession,
     .loadClass(config.`class`).getConstructor()
     .newInstance().asInstanceOf[DataSource]
 
+  dataSource.exchangeConfig = exchangeConfig
+
   // Load all datatypes.
   val types: Seq[DataType[_]] =
     config.datatypes.getOrElse(Seq.empty)
