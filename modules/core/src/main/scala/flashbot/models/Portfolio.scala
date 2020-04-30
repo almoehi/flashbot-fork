@@ -23,6 +23,7 @@ import scala.language.postfixOps
 class Portfolio(private val assets: debox.Map[Account, Double],
                 private val positions: debox.Map[Market, Position],
                 private val orders: debox.Map[Market, OrderBook],
+                private var defaultTargetAsset: String,
                 protected[flashbot] val lastUpdate: MutableOpt[PortfolioDelta] = MutableOpt.from(None))
     extends HasUpdateEvent[Portfolio, PortfolioDelta] {
 
@@ -54,7 +55,7 @@ class Portfolio(private val assets: debox.Map[Account, Double],
         positions(market) = position
 
       case OrdersUpdated(market, bookDelta) =>
-        orders.get(market).get.update(bookDelta)
+        orders.get(market).map(_.update(bookDelta))
 
       case BatchPortfolioUpdate(deltas) =>
         deltas.foreach(delta => this.update(delta))
@@ -76,6 +77,11 @@ class Portfolio(private val assets: debox.Map[Account, Double],
 
   def updateAssetBalance(account: Account, fn: Double => Double): Portfolio =
     withBalance(account, fn(getBalance(account)))
+
+  def withDefaultTargetAsset(asset: String): Portfolio = {
+    this.defaultTargetAsset = asset
+    this
+  }
 
   private var lastCostAccount: Account = _
 
@@ -134,10 +140,11 @@ class Portfolio(private val assets: debox.Map[Account, Double],
   def getOrderMargin(market: Market)
                     (implicit instruments: InstrumentIndex): Double = {
     instruments(market) match {
-      case derivative: Derivative =>
-        val position = positions.get(market).get
-        Margin.calcOrderMargin(position.size, position.leverage,
-          orders(market), derivative)
+      case derivative: Derivative => positions.get(market) match {
+        case Some(pos) => Margin.calcOrderMargin(pos.size, pos.leverage, orders(market), derivative)
+        case _ => 0d // TODO: check if this is a valid default value !!!
+      }
+
     }
   }
 
@@ -244,10 +251,9 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     }
   }
 
-  def getLeverage(market: Market): Double = {
-    val position = positions.get(market).get
-    if (position != null) position.leverage
-    else 1.0
+  def getLeverage(market: Market): Double = positions.get(market) match {
+    case Some(pos) => pos.leverage
+    case _ => 1.0
   }
 
   /**
@@ -283,18 +289,18 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     * Whether the positions are initialized, and prices exist such that all accounts
     * can be converted to the given target asset.
     */
-  def isInitialized(targetAsset: String = "usd")
+  def isInitialized(targetAsset: String = defaultTargetAsset)
                    (implicit prices: PriceIndex,
                     instruments: InstrumentIndex,
                     metrics: Metrics): Boolean =
-    positions.vals.forall(_.isInitialized) &&
-      assets.keys.forall(acc =>
+    positions.vals.filterNot(_ == null).forall(_.isInitialized) &&
+      assets.keys.filterNot(_ == null).forall(acc =>
         !java.lang.Double.isNaN(prices.calcPrice[Account, Symbol](acc, Symbol(targetAsset))))
 
   /**
     * What is the value of our portfolio in terms of `targetAsset`?
     */
-  def getEquity(targetAsset: String = "usd")
+  def getEquity(targetAsset: String = defaultTargetAsset)
                (implicit prices: PriceIndex,
                 instruments: InstrumentIndex,
                 metrics: Metrics): Double = {
@@ -400,17 +406,18 @@ class Portfolio(private val assets: debox.Map[Account, Double],
 object Portfolio {
 
   implicit val portfolioEn: Encoder[Portfolio] =
-    Encoder.forProduct4[Portfolio,
+    Encoder.forProduct5[Portfolio,
       debox.Map[Account, Double], debox.Map[Market, Position],
-      debox.Map[Market, OrderBook], MutableOpt[PortfolioDelta]](
-        "assets", "positions", "orders", "lastUpdate")(p => (p.assets, p.positions, p.orders, p.lastUpdate))
+      debox.Map[Market, OrderBook], MutableOpt[PortfolioDelta], String](
+        "assets", "positions", "orders", "lastUpdate", "defaultTargetAsset")(p => (p.assets, p.positions, p.orders, p.lastUpdate, p.defaultTargetAsset))
 
   implicit val portfolioDe: Decoder[Portfolio] =
-    Decoder.forProduct4[Portfolio,
+    Decoder.forProduct5[Portfolio,
       debox.Map[Account, Double], debox.Map[Market, Position],
-      debox.Map[Market, OrderBook], MutableOpt[PortfolioDelta]](
-        "assets", "positions", "orders", "lastUpdate")(new Portfolio(_, _, _, _))
+      debox.Map[Market, OrderBook], String, MutableOpt[PortfolioDelta]](
+        "assets", "positions", "orders", "lastUpdate", "defaultTargetAsset")(new Portfolio(_, _, _, _, _))
 
-  def empty: Portfolio = new Portfolio(debox.Map.empty, debox.Map.empty, debox.Map.empty)
+  def empty(defaultTargetAsset: String): Portfolio = new Portfolio(debox.Map.empty, debox.Map.empty, debox.Map.empty, defaultTargetAsset)
+  def empty(): Portfolio = new Portfolio(debox.Map.empty, debox.Map.empty, debox.Map.empty, "usd")
 }
 
