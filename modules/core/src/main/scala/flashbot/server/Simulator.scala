@@ -24,7 +24,7 @@ import cats.data
   * real exchange as a parameter to use as a base implementation, but it simulates all API
   * interactions so that no network requests are actually made.
   */
-class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) extends Exchange {
+class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) extends Exchange {
 
   private var myOrders = new java.util.HashMap[String, OrderBook]
   private var depths = new java.util.HashMap[String, Ladder]
@@ -248,7 +248,7 @@ class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) ex
               ctx.emit(OrderOpen(clientOid, product, price, remainder, side))
             }
 
-            RequestSuccess
+            RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
           }
 
         } else {
@@ -267,14 +267,14 @@ class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) ex
               ctx.emit(OrderMatch(String.valueOf(tradeCount), product, micros, size, marketPrice,
                 direction, s"__anon_$tradeCount", clientOid))
               ctx.emit(OrderDone(clientOid, product, side, Filled, Some(price), Some(0)))
-              RequestSuccess
+              RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
 
             } else {
               // Place order in book
               myOrders.get(product).open(clientOid, price, size, side)
               ctx.emit(OrderReceived(clientOid, product, clientOid, LimitOrderType))
               ctx.emit(OrderOpen(clientOid, product, price, size, side))
-              RequestSuccess
+              RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
             }
           } else {
             throw new RuntimeException(s"Not enough data to simulate limit orders for $product.")
@@ -306,7 +306,7 @@ class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) ex
                 s"__anon_$tradeCount", clientOid))
             }
             ctx.emit(OrderDone(clientOid, product, side, Filled, None, None))
-            RequestSuccess
+            RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
           }
 
         } else {
@@ -319,7 +319,7 @@ class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) ex
             ctx.emit(OrderMatch(String.valueOf(tradeCount), product, micros, size, marketPrice,
               direction, s"__anon_$tradeCount", clientOid))
             ctx.emit(OrderDone(clientOid, product, side, Filled, None, None))
-            RequestSuccess
+            RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
 
           } else {
             throw new RuntimeException(s"Not enough data to simulate market orders for $product.")
@@ -335,7 +335,7 @@ class Simulator(base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) ex
         if (order != null) {
           book.done(id)
           ctx.emit(OrderDone(id, instrument.symbol, order.side, Canceled, order.price, Some(order.amount)))
-          RequestSuccess
+          RequestSuccess(Some(id)) // re-use clientOid as exchange order ID
         } else {
           RequestError(BadRequest(s"Cannot cancel unknown order id: $id"))
         }
