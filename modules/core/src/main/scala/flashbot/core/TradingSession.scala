@@ -8,6 +8,7 @@ import akka.event.LoggingAdapter
 import akka.stream.{KillSwitches, Materializer, OverflowStrategy, SharedKillSwitch}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import flashbot.core.Report.ReportError
+import flashbot.core.{BuiltInOrder}
 import flashbot.core.ReportEvent.{SessionFailure, SessionSuccess}
 import flashbot.core.TradingSession.{DataStream, SessionSetup}
 import flashbot.models._
@@ -16,6 +17,8 @@ import flashbot.util._
 import flashbot.util.time.FlashbotTimeout
 import io.circe.Json
 import io.circe.syntax._
+import akka.pattern.ask
+import flashbot.core.Instrument.CurrencyPair
 
 import scala.annotation.tailrec
 import scala.concurrent._
@@ -47,6 +50,7 @@ class TradingSession(val strategyKey: String,
   private lazy val sessionSetup = Await.result(load, FlashbotTimeout.default.duration)
   lazy val instruments: InstrumentIndex = sessionSetup.instruments
   lazy val exchanges: Map[String, Exchange] = sessionSetup.exchanges
+  lazy val fiatRates: Map[CurrencyPair,Double] = sessionSetup.fiatRates
   private lazy val dataStreams: Seq[Source[MarketData[_], NotUsed]] = sessionSetup.streams
 
   // Only backtests have an event loop.
@@ -59,10 +63,11 @@ class TradingSession(val strategyKey: String,
   private val topLevelOrders = new OrderIndex
   private def currentOrderIndex: OrderIndex = if (scope == null) topLevelOrders else scope.children
 
-  val allOrdersByClientId = new java.util.HashMap[String, OrderRef]
-  val allOrdersByExchangeId = new java.util.HashMap[String, OrderRef]
+  // TODO migrate all of this to scala Maps to prevent getting NULL exceptions
+  //val allOrdersByClientId = new java.util.HashMap[String, OrderRef]
+  //val allOrdersByExchangeId = new java.util.HashMap[String, OrderRef]
 
-  val exchangeIdToClientId = new util.HashMap[String, String]()
+  //val exchangeIdToClientId = new util.HashMap[String, String]()
 
   def submit(tag: String, order: OrderRef): OrderRef = {
     if (order.ctx != null) {
@@ -171,7 +176,8 @@ class TradingSession(val strategyKey: String,
     seqNr = seqNr + 1
     tick match {
       case md: MarketData[_] =>
-        strategy.onData(md)
+        //TODO: double check, I'd say this needs to be a call to aroundOnData() instead of onData(), otherwise portfolio will not be initialized
+        strategy.aroundOnData(md)(this)
 
       case callback: Callback =>
         callback.fn.run()
@@ -181,23 +187,21 @@ class TradingSession(val strategyKey: String,
 
       case event: OrderEvent =>
         val order = event match {
-          case r: OrderReceived =>
-            val o = findOrder(r.clientOid)
-            allOrdersByExchangeId.put(r.orderId, o)
-            o
-          case o =>
-            findOrder(o.orderId)
+          case r: OrderReceived => findOrder(r.clientOid)
+          case o => findOrder(o.orderId)
         }
+
         strategy.onEvent(event)
-        order._handleEvent(event)
+        order.map(_._handleEvent(event))
 
     }
   }
 
-  def findOrder(str: String): OrderRef = {
-    val o = allOrdersByClientId.get(str)
-    if (o != null) o
-    else allOrdersByExchangeId.get(str)
+  def findOrder(id: String): Option[OrderRef] = {
+    Some(currentOrderIndex.byClientId.get(id))
+      .filterNot(_ == null)
+      .orElse(Some(currentOrderIndex.byKey.get(id)))
+      .filterNot(_ == null)
   }
 
   private var completeFut: Option[Future[Done]] = None
@@ -223,6 +227,12 @@ class TradingSession(val strategyKey: String,
       _ = {
         strategy = setup.strategy
         id = Some(setup.sessionId)
+
+        // initialize prices PriceIndex for fiat conversion with fiat instrument rates
+        // needed for portfolio conversions for configured targetAssets
+        setup.fiatRates.map{el =>
+          prices.setPrice(Market("fiat", el._1.symbol), el._2)(setup.instruments)
+        }
       }
 
       // Prepare market data streams
@@ -396,6 +406,8 @@ class TradingSession(val strategyKey: String,
     } yield strategy
 
     for {
+
+
       // Check that we have a config for the requested strategy.
       strategyClassName <- loader.strategyClassNames
         .get(strategyKey)
@@ -414,9 +426,11 @@ class TradingSession(val strategyKey: String,
       // Initialize the strategy and collect data paths
       paths <- strategy.initialize(portfolioRef.getPortfolio(Some(instruments)), loader)
 
-      // Load the exchanges
-      exchangeNames: Set[String] = paths.toSet[DataPath[_]].map(_.source)
-        .intersect(exchangeConfigs.keySet)
+      // Load the exchanges PLUS special 'fiat' exchange
+      // TODO: better to add a "isFiat" to Instrument ?
+      exchangeNames: Set[String] = Some(strategy.requiresFiatRates).filter(_ == true).map(_ => Set("fiat")).getOrElse(Set.empty) ++
+        paths.toSet[DataPath[_]].map(_.source)
+          .intersect(exchangeConfigs.keySet)
       _ = { log.debug("Loading exchanges: {}.", exchangeNames) }
 
       exchanges: Map[String, Exchange] <- Future.sequence(exchangeNames.map(n =>
@@ -430,8 +444,19 @@ class TradingSession(val strategyKey: String,
       _ = { log.debug("Resolved {} market data streams out of" +
         " {} paths requested by the strategy.", streams.size, paths.size) }
 
+      // fetch current fiat rates from exchange associated by "fiat" key
+      fiatRates <- exchanges.get("fiat") match {
+        case Some(fEx) if fEx.isInstanceOf[Simulator] && fEx.asInstanceOf[Simulator].base.isInstanceOf[HasFiatRates] =>
+          fEx.asInstanceOf[Simulator].base.asInstanceOf[HasFiatRates].fiatRates(instruments.byExchange("fiat").map(_.symbol))
+        case Some(fEx) if fEx.isInstanceOf[HasFiatRates] =>
+          fEx.asInstanceOf[HasFiatRates].fiatRates(instruments.byExchange("fiat").map(_.symbol))
+        case other =>
+          log.warning(s"No FIAT exchange configured to fetch fiat rates! {}", other)
+          Future.successful(Map.empty[CurrencyPair,Double])
+      }
+
     } yield SessionSetup(instruments, exchanges, strategy, java.util.UUID.randomUUID().toString,
-      streams, sessionStartMicros)
+      streams, fiatRates, sessionStartMicros)
   }
 }
 
@@ -444,6 +469,7 @@ object TradingSession {
                           strategy: Strategy[_],
                           sessionId: String,
                           streams: Seq[Source[MarketData[_], NotUsed]],
+                          fiatRates: Map[CurrencyPair,Double],
                           sessionMicros: Long)
 }
 
