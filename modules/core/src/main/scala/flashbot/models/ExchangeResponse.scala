@@ -1,7 +1,7 @@
 package flashbot.models
 
 sealed trait ExchangeResponse
-case object RequestSuccess extends ExchangeResponse
+case class RequestSuccess(orderId: Option[String] = None) extends ExchangeResponse
 case class RequestError(cause: ExchangeError) extends ExchangeResponse
 
 trait RejectedReason {
