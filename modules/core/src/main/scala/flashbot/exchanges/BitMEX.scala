@@ -24,6 +24,11 @@ class BitMEX(implicit val system: ActorSystem,
           takerFee = 0.00075d
           tickSize = 0.01
         }})
+        put("ethusd", new InstrumentParams(){{
+          makerFee = -0.00025d
+          takerFee = 0.00075d
+          tickSize = 0.05
+        }})
       }})
   }
 
@@ -61,6 +66,8 @@ object BitMEX {
     }
 
     override def valueDouble(price: Double): Double = 1d / price
+
+    //override def tickSize: Double = 0.05
   }
 
   object ETHUSD extends FuturesContract {
@@ -81,6 +88,8 @@ object BitMEX {
     }
 
     override def valueDouble(price: Double): Double = price * bitcoinMultiplier
+
+    //override def tickSize: Double = 0.05
   }
 
   object BXBT extends Index(".BXBT", "xbt", "usd")
