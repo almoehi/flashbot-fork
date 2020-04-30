@@ -20,6 +20,8 @@ trait Instrument {
   // Will be `None` for non-tradable instruments such as indexes.
   def settledIn: Option[String]
 
+  //def tickSize: Double
+
 //  def markPrice(prices: PriceIndex): Double = prices(symbol)
 
 //  def PNL(amount: Double, entryPrice: Double, exitPrice: Double): Double = {
@@ -52,6 +54,8 @@ object Instrument {
     override def settledIn = Some(quote)
     override def security = Some(base)
 
+    def flipped = CurrencyPair(quote,base)
+
 //    override def markPrice(prices: PriceIndex) = prices(this)
     override def canShort = false
 
@@ -76,6 +80,7 @@ object Instrument {
 //    }
 
     override def valueDouble(price: Double): Double = price
+    //override def tickSize: Double = ???
   }
 
   object CurrencyPair {
@@ -112,6 +117,8 @@ object Instrument {
     override def canShort = false
 
     override def valueDouble(price: Double) = ???
+
+    //override def tickSize: Double = ???
   }
 
   trait Derivative extends Instrument {
