@@ -13,6 +13,8 @@ import scala.language.postfixOps
 
 class DataSource {
 
+  var exchangeConfig: Option[ExchangeConfig] = None
+
   /**
     * All available topics for this data source.
     */
