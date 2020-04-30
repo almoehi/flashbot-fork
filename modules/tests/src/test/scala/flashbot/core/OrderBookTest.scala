@@ -16,6 +16,8 @@ class OrderBookTest extends FlatSpec with Matchers {
     val fmt = bookType.fmtJson[OrderBook]
     val bookJson = fmt.modelEn(book)
     val decoded = bookJson.as[OrderBook](fmt.modelDe).right.get
+    println(book)
+    println(decoded)
     decoded shouldEqual book
   }
 }

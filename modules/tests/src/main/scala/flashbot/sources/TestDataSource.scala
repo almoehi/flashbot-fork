@@ -18,10 +18,12 @@ class TestDataSource extends DataSource {
   override def ingest[T](topic: String, datatype: DataType[T])
                         (implicit ctx: ActorContext, mat: ActorMaterializer) = datatype match {
     case TradesType =>
+      val xs = (1 to 120)
       val nowMicros = System.currentTimeMillis() * 1000
-      val src: Source[(Long, T), NotUsed] = Source((1 to 120) map { i =>
+      println(s"TestDataSource: Ingesting $xs")
+      val src: Source[(Long, T), NotUsed] = Source(xs map { i =>
         Trade(i.toString, nowMicros + i * MicrosPerMinute, i, i, if (i % 2 == 0) Up else Down)
       }) map (t => (t.micros, t.asInstanceOf[T]))
-      Future.successful(src.throttle(1, 50 millis))
+      Future.successful(src.throttle(1, 100 millis))
   }
 }

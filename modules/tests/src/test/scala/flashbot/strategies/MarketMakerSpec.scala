@@ -68,12 +68,12 @@ class MarketMakerSpec extends FlatSpec with Matchers {
     val data = Seq(DataOverride("coinbase/btc_usd/candles_1m", candles))
 
     val report = client.backtest("market_maker", params.asJson, portfolio.toString, 1 minute, timeRange, data)
-    val prices = report.timeSeries("coinbase.btc_usd").close.toVector()
-    val fairPrices = report.timeSeries("fair_price_sma").close.toVector()
-    val equity = report.timeSeries("equity").close.toVector()
+    val prices = report.getTimeSeries("coinbase.btc_usd").close.toVector()
+    val fairPrices = report.getTimeSeries("fair_price_sma").close.toVector()
+    val equity = report.getTimeSeries("equity").close.toVector()
     (prices zip fairPrices zip equity).foreach(println)
 
-    report.trades.length shouldEqual 103
+    report.getTrades.size shouldEqual 103
 
     Await.ready(for {
       _ <- system.terminate()
@@ -110,12 +110,12 @@ class MarketMakerSpec extends FlatSpec with Matchers {
     val data = Seq(DataOverride("coinbase/btc_usd/candles_1h", candles))
 
     val report = client.backtest("market_maker", params.asJson, portfolio.toString, 1 hour, timeRange, data)
-    val prices = report.timeSeries("coinbase.btc_usd").close.toVector
-    val fairPrices = report.timeSeries("fair_price_sma").close.toVector
-    val equity = report.timeSeries("equity").close.toVector
+    val prices = report.getTimeSeries("coinbase.btc_usd").close.toVector
+    val fairPrices = report.getTimeSeries("fair_price_sma").close.toVector
+    val equity = report.getTimeSeries("equity").close.toVector
     (prices zip fairPrices zip equity).foreach(println)
 
-    println("# trades: ", report.trades.length)
+    println("# trades: ", report.getTrades.size)
 
     equity.last > 4000 shouldBe true
 
@@ -150,12 +150,12 @@ class MarketMakerSpec extends FlatSpec with Matchers {
     val report = client.backtest("market_maker",
       params.asJson, portfolio.toString, 1 minute, timeRange, data)
 
-    val prices = report.timeSeries("coinbase.btc_usd").close.toVector
-    val fairPrices = report.timeSeries("fair_price_sma").close.toVector
-    val equity = report.timeSeries("equity").close.toVector
-    val usd = report.timeSeries("cash").close.toVector
-    val btc = report.timeSeries("position").close.toVector
-    val hedge = report.timeSeries("hedge").close.toVector
+    val prices = report.getTimeSeries("coinbase.btc_usd").close.toVector
+    val fairPrices = report.getTimeSeries("fair_price_sma").close.toVector
+    val equity = report.getTimeSeries("equity").close.toVector
+    val usd = report.getTimeSeries("cash").close.toVector
+    val btc = report.getTimeSeries("position").close.toVector
+    val hedge = report.getTimeSeries("hedge").close.toVector
 
     def round(d: Double): Double = BigDecimal.valueOf(d)
       .setScale(2, BigDecimal.RoundingMode.HALF_UP).doubleValue()

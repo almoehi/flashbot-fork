@@ -21,6 +21,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 class PriceTapTest extends FlatSpec with Matchers {
+
   "PriceTap" should "emit times" in {
     implicit val system = ActorSystem("test")
     implicit val mat = ActorMaterializer()
@@ -101,19 +102,30 @@ class PriceTapTest extends FlatSpec with Matchers {
 
     val srcItMillis = PriceTap.iterator(200, .55, .35, timerange, 60 seconds).toIterable
     val srcIt = timeseries.scan[(Instant, Double), Candle](srcItMillis, 5 minutes, false, false).toIterable
+    val n_total = 1000
+    val n_split = 500
+    val n_missing = 300
+    println(s"n_total=$n_total | n_split=$n_split | n_missing=$n_missing | n_take=${n_split - n_missing} | delta=${n_missing/5}")
+    val (a, b) = srcIt.take(n_total).splitAt(n_split)
+    val (counterIt, pricesWithGap) = (a ++ b.splitAt(n_split - n_missing)._2).iterator.duplicate
+    counterIt.size shouldEqual (n_split + n_missing)
 
-
-    val (a, b) = srcIt.take(1000).splitAt(500)
-    val (counterIt, pricesWithGap) = (a ++ b.splitAt(200)._2).iterator.duplicate
-    counterIt.size shouldEqual 800
+    val (counterItB, pricesGap) = b.splitAt(n_split - n_missing)._1.iterator.duplicate
+    counterItB.size shouldEqual n_missing
+    //println("TRUE:")
+    //counterIt.map(_.instant).map(println)
 
     // Scan over it to aggregate, 5 minute candles
     val candles = timeseries.scan[Candle, Candle](pricesWithGap.toIterable, 5 minutes, false, false).toVector
+    val candlesMissing = timeseries.scan[Candle, Candle](pricesGap.toIterable, 5 minutes, false, false).toVector
 
+    //println("CANDLES:")
+    //candles.map(_.instant).map(println)
     // The missing data is now filled in
-    candles.size shouldEqual 1000
-    candles.zipWithIndex.foreach { case (x, i) => println(s"$i\t$x") }
 
-    candles.slice(500, 200).map(_.close).forall(_ == candles(500).close)
+    candles.zipWithIndex.foreach { case (x, i) => println(s"$i\t$x") }
+    println(s"Candles size: ${candles.size}")
+    candles.size shouldEqual (n_split + n_missing) + candlesMissing.size
+    candles.slice(50, 20).map(_.close).forall(_ == candles(50).close)
   }
 }

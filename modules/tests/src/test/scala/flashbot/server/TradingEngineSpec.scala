@@ -42,6 +42,7 @@ class TradingEngineSpec extends WordSpecLike
   }
 
   "TradingEngine" should {
+
     "respond to a ping" in {
       implicit val config = FlashbotConfig.load()
       val system = ActorSystem(config.systemName, config.conf)
@@ -121,6 +122,7 @@ class TradingEngineSpec extends WordSpecLike
     /**
       * We should be able to start a bot, then subscribe to a live stream of it's report.
       */
+
     "subscribe to the report of a running bot" in {
 
       implicit val config = FlashbotConfig.load()
@@ -144,7 +146,7 @@ class TradingEngineSpec extends WordSpecLike
 
       // Subscribe to the report. Receive a trade stream.
       val reportTradeSrc = fb.subscribeToReport("bot2")
-        .map(_.values("last_trade").value.asInstanceOf[Trade])
+        .map(_.getValues("last_trade").value.asInstanceOf[Trade])
 
       // Collect the stream into a seq.
       val reportTrades = Await.result(
@@ -168,7 +170,9 @@ class TradingEngineSpec extends WordSpecLike
       } yield Unit, 10 seconds)
     }
 
+
     "enable static bots" in {
+
       implicit val config = FlashbotConfig.load().copy(bots = StaticBotsConfig(
         enabled = Seq("scanner1"),
         configs = Map(
@@ -189,8 +193,8 @@ class TradingEngineSpec extends WordSpecLike
       } yield Unit, 10 seconds)
     }
 
-    "be profitable when using lookahead" in {
 
+    "be profitable when using lookahead" in {
       implicit val config = FlashbotConfig.load()
       implicit val system = ActorSystem(config.systemName, config.conf)
 
@@ -233,10 +237,10 @@ class TradingEngineSpec extends WordSpecLike
       def buildCandleSeries(report: Report, key: String): OHLCSeries = {
         val priceSeries = new OHLCSeries(key)
         val timeClass = reportTimePeriod(report)
-        report.timeSeries(key).toCandlesArray.foreach { candle =>
+        report.getTimeSeries(key).toCandlesArray.foreach { candle =>
           val time =  RegularTimePeriod.createInstance(timeClass,
             new Date(candle.micros / 1000), TimeZone.getDefault)
-//          println("adding", timeClass, time, candle)
+      //          println("adding", timeClass, time, candle)
           priceSeries.add(time, candle.open, candle.high, candle.low, candle.close)
         }
         priceSeries
@@ -245,79 +249,79 @@ class TradingEngineSpec extends WordSpecLike
       val equityCollection = new TimeSeriesCollection()
 
       val priceCollection = new OHLCSeriesCollection()
-//      priceCollection.addSeries(buildCandleSeries(report, "equity_usd"))
-//      priceCollection.addSeries(buildCandleSeries(report, "eth"))
+      //      priceCollection.addSeries(buildCandleSeries(report, "equity_usd"))
+      //      priceCollection.addSeries(buildCandleSeries(report, "eth"))
 
-//      val chart = ChartFactory.createCandlestickChart("Look-ahead Report", "Time",
-//        "Price", priceCollection, true)
+      //      val chart = ChartFactory.createCandlestickChart("Look-ahead Report", "Time",
+      //        "Price", priceCollection, true)
 
-//      val renderer = new CandlestickRenderer
-//      renderer.setAutoWidthMethod(CandlestickRenderer.WIDTHMETHOD_SMALLEST)
-//
-//      val plot = chart.getXYPlot
-//      plot.setRenderer(renderer)
-//
-//
-//      val histogramData = new HistogramDataset()
-//      histogramData.setType(HistogramType.RELATIVE_FREQUENCY)
-//
-//      val returns = report.collections("fill_size").map(_.as[Double].right.build)
-//      histogramData.addSeries("Fill Size", returns.toArray, 40)
-//
-//      val histogram = ChartFactory.createHistogram("Fill Size", "Size", "# of trades",
-//        histogramData, PlotOrientation.VERTICAL, true, true, false)
-//
-//      val hPlot = histogram.getXYPlot
-//      hPlot.setForegroundAlpha(0.85f)
-//      val yaxis = hPlot.getRangeAxis
-//      yaxis.setAutoTickUnitSelection(true)
-//      val xyRenderer = hPlot.getRenderer.asInstanceOf[XYBarRenderer]
-//      xyRenderer.setDrawBarOutline(false)
-//      xyRenderer.setBarPainter(new StandardXYBarPainter)
-//      xyRenderer.setShadowVisible(false)
+      //      val renderer = new CandlestickRenderer
+      //      renderer.setAutoWidthMethod(CandlestickRenderer.WIDTHMETHOD_SMALLEST)
+      //
+      //      val plot = chart.getXYPlot
+      //      plot.setRenderer(renderer)
+      //
+      //
+      //      val histogramData = new HistogramDataset()
+      //      histogramData.setType(HistogramType.RELATIVE_FREQUENCY)
+      //
+      //      val returns = report.collections("fill_size").map(_.as[Double].right.build)
+      //      histogramData.addSeries("Fill Size", returns.toArray, 40)
+      //
+      //      val histogram = ChartFactory.createHistogram("Fill Size", "Size", "# of trades",
+      //        histogramData, PlotOrientation.VERTICAL, true, true, false)
+      //
+      //      val hPlot = histogram.getXYPlot
+      //      hPlot.setForegroundAlpha(0.85f)
+      //      val yaxis = hPlot.getRangeAxis
+      //      yaxis.setAutoTickUnitSelection(true)
+      //      val xyRenderer = hPlot.getRenderer.asInstanceOf[XYBarRenderer]
+      //      xyRenderer.setDrawBarOutline(false)
+      //      xyRenderer.setBarPainter(new StandardXYBarPainter)
+      //      xyRenderer.setShadowVisible(false)
 
-//      chart.setAntiAlias(true)
+      //      chart.setAntiAlias(true)
 
-//      val panel = new ChartPanel(chart)
-//      panel.setVisible(true)
-//      panel.setFillZoomRectangle(true)
-//      panel.setPreferredSize(new java.awt.Dimension(900, 600))
+      //      val panel = new ChartPanel(chart)
+      //      panel.setVisible(true)
+      //      panel.setFillZoomRectangle(true)
+      //      panel.setPreferredSize(new java.awt.Dimension(900, 600))
 
-//      val frame = new ChartFrame("Returns", chart)
-//      frame.pack()
-//      frame.setVisible(true)
-//      frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE)
-
-
-//      val mydata = for {
-//        bp <- report.collections("all/equity").map(_.as[BalancePoint].right.build)
-//      } yield (bp.micros, bp.balance)
-//
-//      val priceData =
-//        for(price <- report.timeSeries("price.bitfinex.eth_usd").dropRight(1))
-//        yield (price.micros / 1000, price.close)
-
-//      val mychart = XYLineChart(mydata)
+      //      val frame = new ChartFrame("Returns", chart)
+      //      frame.pack()
+      //      frame.setVisible(true)
+      //      frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE)
 
 
-//      mychart.show("Equity")
+      //      val mydata = for {
+      //        bp <- report.collections("all/equity").map(_.as[BalancePoint].right.build)
+      //      } yield (bp.micros, bp.balance)
+      //
+      //      val priceData =
+      //        for(price <- report.timeSeries("price.bitfinex.eth_usd").dropRight(1))
+      //        yield (price.micros / 1000, price.close)
 
-//      val fut = Future {
-//        Thread.sleep((2 days).toMillis)
-//      }
-//
-//      Await.ready(fut, 5 minutes)
-
-//      val plot = chart.getPlot.asInstanceOf[XYPlot]
-//
-//      plot.setDomainPannable(true)
-//
-//      val yAxis = plot.getRangeAxis.asInstanceOf[NumberAxis]
-//      yAxis.setForceZeroInRange(false)
-//      yAxis.setAutoRanging(true)
+      //      val mychart = XYLineChart(mydata)
 
 
-//      report.timeSeries("returns").size shouldBe timeSeriesBarCount
+      //      mychart.show("Equity")
+
+      //      val fut = Future {
+      //        Thread.sleep((2 days).toMillis)
+      //      }
+      //
+      //      Await.ready(fut, 5 minutes)
+
+      //      val plot = chart.getPlot.asInstanceOf[XYPlot]
+      //
+      //      plot.setDomainPannable(true)
+      //
+      //      val yAxis = plot.getRangeAxis.asInstanceOf[NumberAxis]
+      //      yAxis.setForceZeroInRange(false)
+      //      yAxis.setAutoRanging(true)
+
+
+      //      report.timeSeries("returns").size shouldBe timeSeriesBarCount
 
       // There shouldn't be a single period of negative returns when the algo is cheating.
 
@@ -325,12 +329,13 @@ class TradingEngineSpec extends WordSpecLike
         _ <- system.terminate()
         _ <- TestDB.dropTestDB()
       } yield Unit, 10 seconds)
-    }
+}
+
 
 //    "lose money when using lookahead to self sabatoge" in {
 //
 //    }
-  }
+}
 //
 //  "TradingEngine" should "start a bot" in {
 //    val system = ActorSystem("test")
