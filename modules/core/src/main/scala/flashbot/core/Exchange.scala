@@ -2,6 +2,7 @@ package flashbot.core
 
 import java.util.UUID.randomUUID
 
+import flashbot.core.Instrument.CurrencyPair
 import flashbot.models._
 import flashbot.util.{NumberUtils, time}
 import io.circe.Json
@@ -10,6 +11,11 @@ import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success, Try}
+
+trait HasFiatRates {
+  def fiatRates(pairs: Set[String]): Future[Map[CurrencyPair,Double]]
+}
+
 
 abstract class Exchange {
 
@@ -116,7 +122,7 @@ abstract class Exchange {
 //                                  tick: Option[Tick]): (List[Fill], List[OrderEvent], List[ExchangeError]) =
 //    (collectQueue(fills), collectQueue(events), collectQueue(errors))
 
-  private var jsonParams: Option[Json] = _
+  protected var jsonParams: Option[Json] = _
   def withParams(json: Option[Json]): Exchange = {
     jsonParams = json
     this
