@@ -59,7 +59,24 @@ object FlashbotConfig {
   }
 
   @ConfiguredJsonCodec(decodeOnly = true)
-  case class ExchangeConfig(`class`: String, params: Option[Json], pairs: Option[Seq[String]])
+  case class ExchangeConfig(`class`: String, params: Option[Json], pairs: Option[Seq[String]], apiCredentials: Option[ExchangeApiCredentials]) {
+    def sandboxApiUrl: Option[String] = params.flatMap(_.hcursor.downField("sandbox").downField("api").as[String].toOption).map(_.stripSuffix("/"))
+    def sandboxWebsocketUrl: Option[String] = params.flatMap(_.hcursor.downField("sandbox").downField("websocket").as[String].toOption).map(_.stripSuffix("/"))
+    def hasSandboxServer: Boolean = params.map(_.hcursor.downField("sandbox").keys.isDefined).getOrElse(false)
+
+    def liveApiUrl: Option[String] = params.flatMap(_.hcursor.downField("live").downField("api").as[String].toOption).map(_.stripSuffix("/"))
+    def liveWebsocketUrl: Option[String] = params.flatMap(_.hcursor.downField("live").downField("websocket").as[String].toOption).map(_.stripSuffix("/"))
+    def hasLiveServer: Boolean = params.map(_.hcursor.downField("live").keys.isDefined).getOrElse(false)
+
+    def isLive: Boolean = params.flatMap(_.hcursor.get[Boolean]("useLive").toOption).getOrElse(false)
+    def apiUrls: Option[(String,String)] = isLive match {
+      case true => Some((liveApiUrl,liveWebsocketUrl)).filter(t => t._1.isDefined && t._2.isDefined).map(t => (t._1.get,t._2.get))
+      case _ => Some((sandboxApiUrl,sandboxWebsocketUrl)).filter(t => t._1.isDefined && t._2.isDefined).map(t => (t._1.get,t._2.get))
+    }
+  }
+
+  @ConfiguredJsonCodec(decodeOnly = true)
+  case class ExchangeApiCredentials(userName: String, apiKey: String, apiSecret: String)
 
   @ConfiguredJsonCodec(decodeOnly = true)
   case class BotConfig(strategy: String,
