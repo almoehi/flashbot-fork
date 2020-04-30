@@ -51,11 +51,11 @@ class CoinbaseMarketDataSource extends DataSource {
     implicit val ec: ExecutionContext = ctx.dispatcher
     val log = ctx.system.log
     val timeout = 10 seconds
-    var uri = uri"https://api.pro.coinbase.com/products"
+    var url = uri"${(exchangeConfig.flatMap(_.apiUrls).map(_._1).getOrElse("https://api.pro.coinbase.com"))}/products"
 
-    log.debug(s"Fetching /products infor from $uri")
+    log.debug(s"Fetching /products infor from $url")
 
-    sttp.get(uri).sendWithRetries().flatMap { rsp =>
+    sttp.get(url).sendWithRetries().flatMap { rsp =>
       rsp.body match {
         case Left(err) => Future.failed(new RuntimeException(s"Error in Coinbase /products request: $err"))
         case Right(bodyStr) => Future.fromTry(decode[Seq[CoinbaseProduct]](bodyStr).toTry)
@@ -207,7 +207,7 @@ class CoinbaseMarketDataSource extends DataSource {
       }
     }
 
-    val client = new FullChannelClient(new URI("wss://ws-feed.pro.coinbase.com"))
+    val client = new FullChannelClient(new URI(exchangeConfig.flatMap(_.apiUrls).map(_._2).getOrElse("wss://ws-feed.pro.coinbase.com")))
 
     // Complete this promise once we series a "subscriptions" message.
     val responsePromise = Promise[Map[String, Source[(Long, T), NotUsed]]]
