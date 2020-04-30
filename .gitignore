@@ -11,3 +11,4 @@ tmp/
 docs/src/main/tut/contributing.md
 /data
 
+/grafana_data/
