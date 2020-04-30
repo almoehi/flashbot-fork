@@ -15,8 +15,10 @@ import akka.stream.{Materializer, OverflowStrategy}
 import akka.util.Timeout
 import com.typesafe.scalalogging.Logger
 import flashbot.client.FlashbotClient
+import flashbot.core.DataServer.LiveStream
 import flashbot.core.DataType.CandlesType
 import flashbot.core.FlashbotConfig.{BotConfig, ExchangeConfig, GrafanaConfig, StaticBotsConfig}
+import flashbot.core.Instrument.CurrencyPair
 import flashbot.core.ReportEvent._
 import flashbot.models._
 import flashbot.server._
@@ -123,6 +125,7 @@ class TradingEngine(engineId: String,
 
   def startEngine: Future[(EngineStarted, Seq[TradingEngineEvent])] = {
     log.debug("Starting engine")
+
     for {
       fetchedPortfolio <- Future.sequence(loader.exchanges.map(name =>
           fetchPortfolio(name).transform {
@@ -356,6 +359,7 @@ class TradingEngine(engineId: String,
         // initial report.
         val src = Await.result(fut1, 5 seconds)
         NetworkSource.build(src) pipeTo sender
+
 
       /**
         * For all configured exchanges, try to fetch the portfolio. Swallow future failures here
@@ -688,7 +692,7 @@ class TradingEngine(engineId: String,
             // Otherwise, use the initial_assets and initial_positions from the bot config.
             val initialSessionPortfolio =
               state.bots.get(name).flatMap(_.sessions.lastOption.map(_.report.portfolio))
-                .getOrElse(new Portfolio(initialAssets, initialPositions, debox.Map.empty))
+                .getOrElse(new Portfolio(initialAssets, initialPositions, debox.Map.empty, params.hcursor.get[String]("defaultTargetAsset").getOrElse("usd")))
             new PortfolioRef.Isolated(initialSessionPortfolio.toString)
 
           case Live =>
@@ -784,7 +788,7 @@ class TradingEngine(engineId: String,
       portfolio <- exchange.fetchPortfolio
       assets = debox.Map.fromIterable(portfolio._1.map { case (k, v) => Account(name, k) -> v })
       positions = debox.Map.fromIterable(portfolio._2.map { case (k, v) => Market(name, k) -> v})
-    } yield new Portfolio(assets, positions, debox.Map.empty)
+    } yield new Portfolio(assets, positions, debox.Map.empty, "usd") // TODO: where to get defaultTargetAsset ?
 
   private def paramsForExchange(name: String): Option[Json] =
     state.exchanges.get(name).map(_.params).orElse(exchangeConfigs(name).params)
