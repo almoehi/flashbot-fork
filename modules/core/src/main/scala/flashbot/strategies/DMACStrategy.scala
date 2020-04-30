@@ -6,6 +6,7 @@ import flashbot.models.Order.{Buy, Sell}
 import flashbot.models.{DataPath, Market, Portfolio}
 import io.circe.generic.JsonCodec
 import io.circe.parser._
+import scala.concurrent.duration._
 import org.ta4j.core.indicators.SMAIndicator
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 import org.ta4j.core.trading.rules.{CrossedDownIndicatorRule, CrossedUpIndicatorRule, StopGainRule, StopLossRule}
@@ -14,7 +15,7 @@ import scala.concurrent.Future
 import scala.util.Try
 
 @JsonCodec
-case class DMACParams(market: String, smaShort: Int, smaLong: Int)
+case class DMACParams(market: String, smaShort: Int, smaLong: Int, stopLoss: Double = 0.97d, takeProfit: Double = 1.02d, targetAsset: String = "usd")
 
 class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
   override def decodeParams(paramsStr: String): Try[DMACParams] = decode[DMACParams](paramsStr).toTry
@@ -32,20 +33,37 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
   override def initialize(portfolio: Portfolio, loader: EngineLoader): Future[Seq[DataPath[Nothing]]] =
     Future.successful(Seq(DataPath(market, "candles_1m")))
 
+  override def requiredWarmupDuration = 2 seconds
+
   var isLong = false
   var enteredAt: Double = -1d
 
-  val stopLoss = .97d
-  val takeProfit = 1.02d
+  lazy val stopLoss = params.stopLoss
+  lazy val takeProfit = params.takeProfit
+  override def defaultTargetAsset = params.targetAsset
 
   override def onData(data: MarketData[_]): Unit = {
     val portfolio = ctx.getPortfolio
     val balance: FixedSize = portfolio.getBalanceSize(market.settlementAccount)
     val holding = portfolio.getBalanceSize(market.securityAccount)
-    val price = getPrice(market)
+    val price = try {
+      getPrice(market)
+    } catch {
+      case t:Throwable =>
+        ctx.log.error(t, s"Unable to retrieve price for: $market")
+        return
+    }
 
     val hasCrossedUp = crossedUp.isSatisfied(index(market))
     val hasCrossedDown = crossedDown.isSatisfied(index(market))
+
+    //recordTimeSeries("equity", data.micros, portfolio.getEquity(market.settlementAccount.security))
+
+    recordTimeSeries("position", data.micros,
+      portfolio.getBalance(market.securityAccount))
+
+    recordTimeSeries("cash", data.micros,
+      portfolio.getBalance(market.settlementAccount))
 
     // 3% stop loss
     val stopLossTriggered = isLong && price < enteredAt * stopLoss
