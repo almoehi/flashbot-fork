@@ -383,7 +383,7 @@ class TradingSession(val strategyKey: String,
 
     log.debug("Starting async setup")
 
-    def loadStrat[T](clazz: String): Future[Strategy[T]] = for {
+    def loadStrat[T <: StrategyParams](clazz: String): Future[Strategy[T]] = for {
       // Load the strategy
       strategy <- Future.fromTry[Strategy[T]](loader.loadNewStrategy[T](clazz))
 
@@ -419,7 +419,7 @@ class TradingSession(val strategyKey: String,
 
       // Load strategy
       strategy <- {
-        val strat: Future[Strategy[_]] = loadStrat(strategyClassName)
+        val strat: Future[Strategy[_ <: StrategyParams]] = loadStrat(strategyClassName)
         strat
       }
 
@@ -466,7 +466,7 @@ object TradingSession {
 
   case class SessionSetup(instruments: InstrumentIndex,
                           exchanges: Map[String, Exchange],
-                          strategy: Strategy[_],
+                          strategy: Strategy[_ <: StrategyParams],
                           sessionId: String,
                           streams: Seq[Source[MarketData[_], NotUsed]],
                           fiatRates: Map[CurrencyPair,Double],

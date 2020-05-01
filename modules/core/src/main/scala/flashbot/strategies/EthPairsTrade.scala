@@ -27,7 +27,7 @@ import scala.language.postfixOps
 case class PairsTradeParams(eth_market: String,
                             hedge_market: String,
                             mode: String,
-                            threshold: Double)
+                            threshold: Double, reportTargetAsset: String = "usd") extends StrategyParams
 
 class EthPairsTrade extends Strategy[PairsTradeParams] with TimeSeriesMixin {
 

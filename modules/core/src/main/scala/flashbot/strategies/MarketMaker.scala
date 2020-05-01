@@ -47,7 +47,8 @@ case class MarketMakerParams(market: String,
                              layerSpacing: Double,
                              quoteSize: Double,
                              varianceBars: Int,
-                             volPower: Double)
+                             volPower: Double,
+                             reportTargetAsset: String = "usd") extends StrategyParams
 
 /**
   * An example market making strategy. It layers a number of asks and bids on each

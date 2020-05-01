@@ -29,7 +29,7 @@ import scala.util.Try
   *
   * Documentation: https://github.com/infixtrading/flashbot/wiki/Writing-Custom-Strategies
   */
-abstract class Strategy[P] extends DataHandler {
+abstract class Strategy[P <: StrategyParams] extends DataHandler {
 
   /**
     * The trading session that this strategy is running in.
@@ -50,7 +50,10 @@ abstract class Strategy[P] extends DataHandler {
   def title: String
 
   /**
-    * the default target asset used to compute the portfolio
+    * the default target asset used to compute the portfolio values @see TimeSeriesMixin
+    * may implicitly perform currency conversion, e.g. USD->EUR
+    * fiat converison rates are either used from the SAME exchange (if ingested)
+    * or otherwise external fiat rates will be used, pulled from configured "fiat" exchange and fetched for each TradingSession if requiresFiatRates=true
     * defaults to USD
     * @return
     */
@@ -58,6 +61,7 @@ abstract class Strategy[P] extends DataHandler {
 
   /**
     * indicate, if this strategy requires fiat rates to be fetched
+    * this should probably be true for all crypto trading strategies
     * @return
     */
   def requiresFiatRates: Boolean = true
@@ -320,4 +324,8 @@ trait DataHandler {
 
 trait EventHandler {
   def aroundHandleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit
+}
+
+trait StrategyParams {
+  def reportTargetAsset: String
 }

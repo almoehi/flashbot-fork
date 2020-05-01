@@ -18,7 +18,7 @@ import scala.util.{Failure, Success, Try}
   * A thin wrapper around [[Strategy]] that which converts between Java and Scala
   * data structures to provide a native Java API for writing strategies.
   */
-abstract class JavaStrategy[P] extends Strategy[P] with TimeSeriesMixin {
+abstract class JavaStrategy[P <: StrategyParams] extends Strategy[P] with TimeSeriesMixin {
   final override def decodeParams(paramsStr: String): Try[P] = {
     try {
       Success(jDecodeParams(paramsStr))

@@ -1,6 +1,6 @@
 package flashbot.strategies
 
-import flashbot.core.{EngineLoader, MarketData, Strategy}
+import flashbot.core.{EngineLoader, MarketData, Strategy, StrategyParams}
 import flashbot.models.{Market, Portfolio}
 import io.circe.generic.JsonCodec
 import io.circe.parser._
@@ -8,7 +8,7 @@ import io.circe.parser._
 import scala.concurrent.Future
 
 @JsonCodec
-case class FuturesArbParams()
+case class FuturesArbParams(reportTargetAsset: String = "usd") extends StrategyParams
 
 class BTCFuturesArb extends Strategy[FuturesArbParams] {
 

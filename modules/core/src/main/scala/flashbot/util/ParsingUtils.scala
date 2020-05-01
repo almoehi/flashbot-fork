@@ -20,10 +20,13 @@ object ParsingUtils extends RegexParsers {
     *
     * bitmex/xbtusd=-10000x2@500,coinbase/btc=5.0,coinbase/usd=0
     * bitmex/xbtusd=-10000@500
-    * bitmex/xbtusd=-10000x2,bitmex/xbtusd=-10000
+    * bitmex/xbtusd=-10000x2,bitmex/xbtusd=-10000,targetAsset=usd
     */
   def parsePortfolio(expr: String)(implicit instruments: InstrumentIndex): Portfolio = {
-    expr.split(",").map(_.trim).filterNot(_.isEmpty).foldLeft(Portfolio.empty) {
+    expr.split(",").map(_.trim).filterNot(_.isEmpty).foldLeft(Portfolio.empty("usd")) {
+      case (portfolio, item) if item.startsWith("defaultTargetAsset=") =>
+        val parts = item.split("=")
+        portfolio.withDefaultTargetAsset(parts(1))
       case (portfolio, item) => item.split("=").toList match {
         case k@key(exchange, symbol) :: pos :: Nil =>
           (pos, instruments.get(exchange, symbol).isDefined) match {

@@ -15,7 +15,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 @JsonCodec
-case class EmptyParams(markets: String, datatype: String)
+case class EmptyParams(markets: String, datatype: String, reportTargetAsset: String = "usd") extends StrategyParams
 
 class EmptyStrat extends Strategy[EmptyParams] with TimeSeriesMixin {
 

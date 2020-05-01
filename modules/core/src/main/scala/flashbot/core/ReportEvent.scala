@@ -14,6 +14,9 @@ sealed trait PortfolioDelta extends ReportEvent
 case class BalanceUpdated(account: Account, balance: Option[Double]) extends PortfolioDelta
 
 @JsonCodec
+case class DefaultTargetAssetUpdated(asset: String) extends PortfolioDelta
+
+@JsonCodec
 case class PositionUpdated(market: Market, position: Option[Position]) extends PortfolioDelta
 
 @JsonCodec

@@ -20,6 +20,7 @@ class Report(val strategy: String,
              val params: Json,
              val barSize: FiniteDuration,
              val portfolio: Portfolio,
+             val targetAsset: String, // target asset used to compute equity etc.
              private val trades: debox.Buffer[TradeEvent],
              private val collections: debox.Map[String, debox.Buffer[Json]],
              private val timeSeries: debox.Map[String, CandleFrame],
@@ -176,30 +177,33 @@ object Report {
   implicit val rvAnyEncoder: Encoder[ReportValue[Any]] =
     rvJsonEncoder.contramap(rv => ReportValue(rv.fmtName, rv.toJson))
 
-  implicit val reportEn: Encoder[Report] = Encoder.forProduct11(
-    "strategy", "params", "barSize", "portfolio", "trades", "collections",
+  implicit val reportEn: Encoder[Report] = Encoder.forProduct12(
+    "strategy", "params", "barSize", "portfolio", "targetAsset", "trades", "collections",
     "timeSeries", "values", "isComplete", "error", "lastUpdate")(r =>
-      (r.strategy, r.params, r.barSize, r.portfolio, r.trades, r.collections,
+      (r.strategy, r.params, r.barSize, r.portfolio, r.targetAsset, r.trades, r.collections,
         r.timeSeries, r.values, r.isComplete, r.error, r.lastUpdate))
 
-  implicit val reportDe: Decoder[Report] = Decoder.forProduct11[Report,
+  implicit val reportDe: Decoder[Report] = Decoder.forProduct12[Report,
       String, Json, FiniteDuration, Portfolio,
+      String,
       debox.Buffer[TradeEvent],
       debox.Map[String, debox.Buffer[Json]],
       debox.Map[String, CandleFrame],
       debox.Map[String, ReportValue[Any]],
       Boolean, Option[ReportError], MutableOpt[ReportEvent]
-    ]("strategy", "params", "barSize", "portfolio", "trades", "collections",
+    ]("strategy", "params", "barSize", "portfolio", "targetAsset", "trades", "collections",
       "timeSeries", "values", "isComplete", "error", "lastUpdate"
-  )(new Report(_, _, _, _, _, _, _, _, _, _, _))
+  )(new Report(_, _, _, _, _,  _, _, _, _, _, _, _))
 
   def empty(strategyName: String,
             params: Json,
-            barSize: Option[FiniteDuration] = None): Report = new Report(
+            barSize: Option[FiniteDuration] = None,
+            reportTargetAsset: Option[String] = None): Report = new Report(
     strategyName,
     params,
     barSize.getOrElse(1 hour),
-    Portfolio.empty,
+    Portfolio.empty(reportTargetAsset.orElse(params.hcursor.get[String]("reportTargetAsset").toOption).getOrElse("usd")),
+    reportTargetAsset.orElse(params.hcursor.get[String]("reportTargetAsset").toOption).getOrElse("usd"),
     debox.Buffer.empty,
     debox.Map.empty,
     debox.Map.empty,

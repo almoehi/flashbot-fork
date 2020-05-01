@@ -59,6 +59,9 @@ class Portfolio(private val assets: debox.Map[Account, Double],
 
       case BatchPortfolioUpdate(deltas) =>
         deltas.foreach(delta => this.update(delta))
+
+      case DefaultTargetAssetUpdated(asset) =>
+        defaultTargetAsset = asset
     }
 
     if (recordingBuffer.nonEmpty) recordingBuffer.get.append(delta)
@@ -79,8 +82,7 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     withBalance(account, fn(getBalance(account)))
 
   def withDefaultTargetAsset(asset: String): Portfolio = {
-    this.defaultTargetAsset = asset
-    this
+    _step(DefaultTargetAssetUpdated(asset))
   }
 
   private var lastCostAccount: Account = _
@@ -398,7 +400,7 @@ class Portfolio(private val assets: debox.Map[Account, Double],
   override def toString: String = {
     (assets.iterator().toSeq.map(a => Seq(a._1, a._2).mkString("=")) ++
         positions.iterator().toSeq.map(p => Seq(p._1, p._2).mkString("="))).sorted
-      .mkString(",")
+      .mkString(",") + ",defaultTargetAsset=" + defaultTargetAsset
   }
 
 }
@@ -418,6 +420,6 @@ object Portfolio {
         "assets", "positions", "orders", "lastUpdate", "defaultTargetAsset")(new Portfolio(_, _, _, _, _))
 
   def empty(defaultTargetAsset: String): Portfolio = new Portfolio(debox.Map.empty, debox.Map.empty, debox.Map.empty, defaultTargetAsset)
-  def empty(): Portfolio = new Portfolio(debox.Map.empty, debox.Map.empty, debox.Map.empty, "usd")
+  //def empty(): Portfolio = new Portfolio(debox.Map.empty, debox.Map.empty, debox.Map.empty, "usd")
 }
 

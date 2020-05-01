@@ -15,7 +15,7 @@ import scala.concurrent.Future
 import scala.util.Try
 
 @JsonCodec
-case class DMACParams(market: String, smaShort: Int, smaLong: Int, stopLoss: Double = 0.97d, takeProfit: Double = 1.02d, targetAsset: String = "usd")
+case class DMACParams(market: String, smaShort: Int, smaLong: Int, stopLoss: Double = 0.97d, takeProfit: Double = 1.02d, reportTargetAsset: String = "usd") extends StrategyParams
 
 class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
   override def decodeParams(paramsStr: String): Try[DMACParams] = decode[DMACParams](paramsStr).toTry
@@ -40,7 +40,7 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
 
   lazy val stopLoss = params.stopLoss
   lazy val takeProfit = params.takeProfit
-  override def defaultTargetAsset = params.targetAsset
+  override def defaultTargetAsset = params.reportTargetAsset
 
   override def onData(data: MarketData[_]): Unit = {
     val portfolio = ctx.getPortfolio

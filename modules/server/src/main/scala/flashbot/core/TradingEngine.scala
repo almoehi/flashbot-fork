@@ -137,7 +137,7 @@ class TradingEngine(engineId: String,
         // Merge individual portfolios into one. Ignore failed portfolio fetches.
         .map(_.collect {
           case Some(value: Portfolio) => value
-        }.foldLeft(Portfolio.empty)(_ merge _))
+        }.foldLeft(Portfolio.empty("usd"))(_ merge _)) // note: we set default targetAsset to "USD" which get's updated later whenever we read from globalPortfolio
 
       // Set it in-memory portfolio state
       _ = { globalPortfolio.put(fetchedPortfolio) }
@@ -692,20 +692,22 @@ class TradingEngine(engineId: String,
             // Otherwise, use the initial_assets and initial_positions from the bot config.
             val initialSessionPortfolio =
               state.bots.get(name).flatMap(_.sessions.lastOption.map(_.report.portfolio))
-                .getOrElse(new Portfolio(initialAssets, initialPositions, debox.Map.empty, params.hcursor.get[String]("defaultTargetAsset").getOrElse("usd")))
+                .getOrElse(new Portfolio(initialAssets, initialPositions, debox.Map.empty, params.hcursor.get[String]("reportTargetAsset").getOrElse("usd")))
             new PortfolioRef.Isolated(initialSessionPortfolio.toString)
 
           case Live =>
             // Instantiate an anonymous PortfolioRef which uses the actor state in scope.
             // Use locking to prevent race conditions when updating the portfolio.
+            // change portfolio's defaultTargetAsset according to what's been set in strategy's params json
+            // the params json contains the strategy params, which need to implement StrategyParams trait providing the "reportTargetAsset" property
             new PortfolioRef {
-              override def getPortfolio(instruments: Option[InstrumentIndex]): Portfolio = globalPortfolio.get
+              override def getPortfolio(instruments: Option[InstrumentIndex]): Portfolio = globalPortfolio.get.withDefaultTargetAsset(params.hcursor.get[String]("reportTargetAsset").getOrElse("usd"))
 
-              override def printPortfolio: String = globalPortfolio.get.toString
+              override def printPortfolio: String = globalPortfolio.get.toString //withDefaultTargetAsset(params.hcursor.get[String]("reportTargetAsset").getOrElse("usd")).toString
 
               override def acquirePortfolio(ctx: TradingSession): Portfolio = globalPortfolio.take()
 
-              override def releasePortfolio(portfolio: Portfolio): Unit = globalPortfolio.put(portfolio)
+              override def releasePortfolio(portfolio: Portfolio): Unit = globalPortfolio.put(portfolio.withDefaultTargetAsset(params.hcursor.get[String]("reportTargetAsset").getOrElse("usd")))
             }
         }
 

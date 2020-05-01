@@ -34,5 +34,5 @@ class TimeSeriesStrategy extends Strategy[Params] with TimeSeriesMixin {
 }
 
 object TimeSeriesStrategy {
-  @JsonCodec case class Params(path: String)
+  @JsonCodec case class Params(path: String, reportTargetAsset: String = "usd") extends StrategyParams
 }

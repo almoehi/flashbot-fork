@@ -62,7 +62,7 @@ class EngineLoader(val getExchangeConfigs: () => Map[String, ExchangeConfig],
     }
   }
 
-  protected[flashbot] def loadNewStrategy[P](className: String): Try[Strategy[P]] =
+  protected[flashbot] def loadNewStrategy[P <: StrategyParams](className: String): Try[Strategy[P]] =
     try {
       val clazz = getClass.getClassLoader.loadClass(className).asSubclass(classOf[Strategy[P]])
       Success(clazz.newInstance())
