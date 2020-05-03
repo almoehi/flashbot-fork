@@ -307,7 +307,7 @@ class TradingSession(val strategyKey: String,
             }
 
             // Fast forward the event loop.
-            println(s"${md.micros} \t $md")
+            //println(s"${md.micros} \t $md")
             scheduler.fastForward(md.micros, processTick)
 
           case _ =>
