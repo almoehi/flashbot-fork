@@ -234,7 +234,10 @@ class DataServer(dbConfig: Config,
 
           _ = { log.info("Built historical stream {} {}", path, historical) }
 
-          joined = historical.concat(live).via(dropUnordered(MarketData.orderBySequence[T])) //.alsoTo(Sink.foreach(println))
+          // TODO: this should probably be ordered by: (bundle_id descending and seqId ascending) OR probably better time & seqId beause bundle_id is not necesarrily ordered !
+          //joined = historical.concat(live).via(dropUnordered(MarketData.orderBySequence[T]))
+          joined = historical.concat(live).via(dropUnordered(MarketData.orderByTimeAndSeqId[T]))
+          // .alsoTo(Sink.foreach(println))
 
         } yield takeLimit match {
           case TakeFirst(limit) => joined.take(limit)

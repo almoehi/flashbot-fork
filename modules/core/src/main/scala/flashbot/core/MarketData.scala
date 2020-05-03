@@ -54,8 +54,10 @@ trait MarketData[T] extends Timestamped with Tick {
 }
 
 object MarketData {
-  def orderByTime: Ordering[MarketData[_]] = Ordering.by[MarketData[_], Long](_.micros)
-  def orderBySequence[T]: Ordering[MarketData[T]] = Ordering.by(x => (x.bundle, x.seqid))
+  def orderByTimeAndSeqId[T]: Ordering[MarketData[T]] = Ordering.by[MarketData[T], (Long,Long)](x => (x.micros,x.seqid))
+  def orderByTimeAndSeqIdAny: Ordering[MarketData[_]] = Ordering.by[MarketData[_], (Long,Long)](x => (x.micros,x.seqid))
+  def orderByTime[T]: Ordering[MarketData[T]] = Ordering.by[MarketData[T], Long](_.micros) // WARNING: ordering by time is not unique, e.g. there exist events happening at exactly the same time !
+  // def orderBySequence[T]: Ordering[MarketData[T]] = Ordering.by(x => (x.bundle, x.seqid))  // WARNING: bundle_id is NOT necessarily ordered !
 
   case class MarketDelta[D](delta: D, micros: Long, bundle: Long)
 

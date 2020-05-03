@@ -182,9 +182,11 @@ class TradingSession(val strategyKey: String,
       case callback: Callback =>
         callback.fn.run()
 
+      // TODO: emit also to Report ?
       case req: SimulatedRequest =>
         req.exchange.simulateReceiveRequest(scheduler.currentMicros, req)
 
+      // TODO: emit also to Report to maintain a list of placed/received/canceled orders which should be recorded as events in a time-series
       case event: OrderEvent =>
         val order = event match {
           case r: OrderReceived => findOrder(r.clientOid)
@@ -235,6 +237,9 @@ class TradingSession(val strategyKey: String,
         }
       }
 
+      // TODO: run fitOn if strategy is instance of TrainableStrategy
+      // streams should be backtest - offset (todo: configure offset in strategy?)
+
       // Prepare market data streams
       (dataStreamsDone, marketDataStream) =
 
@@ -242,7 +247,7 @@ class TradingSession(val strategyKey: String,
       // But if this is a live trading session then data is sent first come, first serve
       // to keep latencies low.
       dataStreams.reduce[DataStream](
-        if (mode.isBacktest) _.mergeSorted(_)(Ordering.by[MarketData[_], Long](_.micros))
+        if (mode.isBacktest) _.mergeSorted(_)(MarketData.orderByTimeAndSeqIdAny) // ordering by time AND seq_id
         else _.merge(_))
 //        .alsoTo(Sink.foreach { x =>
 //          //log.debug(s"Session DataStream item: $x")
@@ -302,6 +307,7 @@ class TradingSession(val strategyKey: String,
             }
 
             // Fast forward the event loop.
+            println(s"${md.micros} \t $md")
             scheduler.fastForward(md.micros, processTick)
 
           case _ =>
