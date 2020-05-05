@@ -6,7 +6,7 @@ import io.circe.optics.JsonPath
 import io.circe.optics.JsonPath._
 import io.circe.parser._
 import io.circe.syntax._
-import io.circe.{Json, JsonObject}
+import io.circe._
 
 /**
   * Description of a strategy.
@@ -16,10 +16,13 @@ import io.circe.{Json, JsonObject}
   */
 case class StrategyInfo(jsonSchema: Option[Json] = None,
                         layout: DashboardBuilder = Layout.default,
+                        paramKeys: Set[String] = Set.empty,
                         title: String = "") {
 
   def withSchema(schemaStr: String): StrategyInfo = withSchema(parse(schemaStr).right.get)
   def withSchema(newSchema: Json): StrategyInfo = copy(jsonSchema = Some(newSchema))
+
+  def withParamKeys(params: Seq[String]): StrategyInfo = copy(paramKeys = paramKeys ++ params)
 
   def withParamOptions(param: String, options: Seq[Any]): StrategyInfo =
     withParamOptionsOpt(param, options, None)
@@ -39,6 +42,8 @@ case class StrategyInfo(jsonSchema: Option[Json] = None,
       withSchema((withEnums compose withDefault) (jsonSchema.get))
     } else this
   }
+
+  def getParam(param: String) = default(param).json.getOption(Json.Null).headOption
 
   def withParamDefault(param: String, value: Any): StrategyInfo = {
     val defaultVal = encodePropertyValue(param, value)

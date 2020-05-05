@@ -157,9 +157,12 @@ class Portfolio(private val assets: debox.Map[Account, Double],
                        (implicit instruments: InstrumentIndex,
                         prices: PriceIndex,
                         metrics: Metrics): Double = {
-    val instrument = instruments(market).asInstanceOf[Derivative]
-    val position = positions(market)
-    position.initialMargin(instrument) + getPositionPnl(market)
+    instruments(market) match {
+      case derivative: Derivative =>
+        val position = positions(market)
+        position.initialMargin(derivative) + getPositionPnl(market)
+      case _ => 0d // TODO: check if this is a valid default value
+    }
   }
 
   /**

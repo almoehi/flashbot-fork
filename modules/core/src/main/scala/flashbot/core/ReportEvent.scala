@@ -41,10 +41,6 @@ object ReportEvent {
                         micros: Long,
                         price: Double,
                         size: Double) extends ReportEvent with Timestamped
-//  object TradeEvent {
-//    implicit def tradeEventEn: Encoder[TradeEvent] = deriveEncoder[TradeEvent]
-//    implicit def tradeEventDe: Decoder[TradeEvent] = deriveDecoder[TradeEvent]
-//  }
 
   @JsonCodec
   case class PriceEvent(market: Market,
@@ -65,36 +61,19 @@ object ReportEvent {
   }
   case class CandleUpdate(series: String, candle: Candle) extends CandleEvent
   case class CandleAdd(series: String, candle: Candle) extends CandleEvent
-//  object CandleEvent {
-//    implicit def candleEventEn: Encoder[CandleEvent] = deriveEncoder
-//    implicit def candleEventDe: Decoder[CandleEvent] = deriveDecoder
-//  }
-
 
   @JsonCodec
   case class CollectionEvent(name: String, item: Json) extends ReportEvent
-//  object CollectionEvent {
-//    implicit def collEventEn: Encoder[CollectionEvent] = deriveEncoder
-//    implicit def collEventDe: Decoder[CollectionEvent] = deriveDecoder
-//  }
 
   @JsonCodec
   sealed trait SessionComplete extends ReportEvent
   case object SessionSuccess extends SessionComplete
   case class SessionFailure(err: ReportError) extends SessionComplete
 
-//  case class ReportValueEvent(event: ValueEvent) extends ReportEvent
-
   @JsonCodec
   sealed trait ValueEvent extends ReportEvent
   case class PutValueEvent(key: String, fmtName: String, value: Json) extends ValueEvent
   case class UpdateValueEvent(key: String, delta: Json) extends ValueEvent
   case class RemoveValueEvent(key: String) extends ValueEvent
-
-
-//  implicit def reportEventEn(implicit valEventEn: Encoder[ValueEvent]): Encoder[ReportEvent] =
-//    deriveEncoder[ReportEvent]
-//  implicit def reportEventDe(implicit valEventDe: Decoder[ValueEvent]): Decoder[ReportEvent] =
-//    deriveDecoder[ReportEvent]
 
 }

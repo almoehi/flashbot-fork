@@ -326,6 +326,16 @@ trait EventHandler {
   def aroundHandleEvent(event: StrategyEvent)(implicit ctx: TradingSession): Unit
 }
 
+trait TrainableStrategy[P <: StrategyParams] extends Strategy[P] {
+  // TODO: fitOn should be possible to persist fitted parameters & restore when strategy is loaded
+  // model fitting should be possible to be used using the same workflow as with backtesting, but peristing traned model model parameteers on completion
+  // TODO: idea: make Train() a subclass of Backtest mode ?
+  // TODO: how to handle cross-val / model selection ?
+  def fitOn(streams: Seq[Source[MarketData[_], NotUsed]])(implicit ctx: TradingSession): Future[Unit]
+
+  def fitStreamDuration: FiniteDuration // fitOn streams should be: backtest start - fitStreamDuration or for LIVE: now - fitStreamDuration
+}
+
 trait StrategyParams {
   def reportTargetAsset: String
 }

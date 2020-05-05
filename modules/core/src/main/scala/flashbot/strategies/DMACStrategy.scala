@@ -1,18 +1,22 @@
 package flashbot.strategies
 
+import flashbot.core.DataType.{CandlesType, TradesType}
 import flashbot.core._
 import flashbot.core.FixedSize._
 import flashbot.models.Order.{Buy, Sell}
 import flashbot.models.{DataPath, Market, Portfolio}
 import io.circe.generic.JsonCodec
 import io.circe.parser._
+import flashbot.util.time._
+import com.github.andyglow.jsonschema.AsCirce._
 import scala.concurrent.duration._
 import org.ta4j.core.indicators.SMAIndicator
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator
 import org.ta4j.core.trading.rules.{CrossedDownIndicatorRule, CrossedUpIndicatorRule, StopGainRule, StopLossRule}
-
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.Try
+import scala.language.{implicitConversions, postfixOps}
 
 @JsonCodec
 case class DMACParams(market: String, smaShort: Int, smaLong: Int, stopLoss: Double = 0.97d, takeProfit: Double = 1.02d, reportTargetAsset: String = "usd") extends StrategyParams
@@ -42,6 +46,10 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
   lazy val takeProfit = params.takeProfit
   override def defaultTargetAsset = params.reportTargetAsset
 
+  override def onEvent(event: OrderEvent): Unit = {
+    // TODO: record ordering events
+    //println(s"onEvent: $event")
+  }
   override def onData(data: MarketData[_]): Unit = {
     val portfolio = ctx.getPortfolio
     val balance: FixedSize = portfolio.getBalanceSize(market.settlementAccount)
@@ -65,6 +73,14 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
     recordTimeSeries("cash", data.micros,
       portfolio.getBalance(market.settlementAccount))
 
+    recordTimeSeries("smaShort",
+      smaShort.getTimeSeries.getLastBar.getEndTime.toInstant.micros,
+      smaShort.getValue(smaShort.getTimeSeries.getEndIndex).doubleValue())
+
+    recordTimeSeries("smaLong",
+      smaLong.getTimeSeries.getLastBar.getEndTime.toInstant.micros,
+      smaLong.getValue(smaLong.getTimeSeries.getEndIndex).doubleValue())
+
     // 3% stop loss
     val stopLossTriggered = isLong && price < enteredAt * stopLoss
 
@@ -74,12 +90,65 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
     if (hasCrossedUp && !isLong) {
       isLong = true
       enteredAt = price
+      println(s"BUY: ${balance.amount * portfolio.getLeverage(market)}")
       ctx.submit(new MarketOrder(market, balance.amount * portfolio.getLeverage(market)))
 
     } else if (stopLossTriggered || takeProfitTriggered || (hasCrossedDown && isLong)) {
       isLong = false
       enteredAt = -1
+      println(s"SELL: ${holding.amount}")
       ctx.submit(new MarketOrder(market, -holding.amount))
     }
   }
+
+  override def info(loader: EngineLoader) = for {
+    markets <- loader.markets
+    initial <- super.info(loader)
+  } yield initial
+    // Generate a JSON Schema automatically from the params class.
+    .withSchema(json.Json.schema[DMACParams].asCirce().noSpaces)
+    .withParamKeys(json.Json.schema[DMACParams].asCirce().hcursor.keys.map(_.toSeq).getOrElse(Seq.empty))
+
+    // Add available options to the "market", "datatype", and "fairPriceIndicator" params.
+    // This also sets the default for each parameter as the third argument.
+    .withParamOptionsOpt("market", markets.toSeq, markets.headOption)
+    //.withParamOptions("datatype", Seq(TradesType, CandlesType(1 minute)), TradesType)
+    .withParamOptions("reportTargetAsset", Seq("eur","usd"), "eur")
+
+    // Set defaults for the rest of the fields.
+    // TODO: can we somehow derive them fomr the DMACStrategyParam case class ???
+    .withParamDefault("smaShort", 7)
+    .withParamDefault("smaLong", 14)
+    .withParamDefault("stopLoss", 0.97d)
+    .withParamDefault("takeProfit", 1.05d)
+    .withParamDefault("reportTargetAsset", "eur")
+
+
+    // Update the layout
+    .updateLayout(_
+    .addPanel("Prices")
+    //.addQuery("price", "$market Price", "Prices")
+    //.addTimeSeries("price", "Prices")
+    .addTimeSeries("${market:json}", "Prices")
+    .addTimeSeries("smaShort", "Prices")
+    .addTimeSeries("smaLong", "Prices")
+    /*
+    .addTimeSeries("fair_price_${fairPriceIndicator}", "Prices")
+    .addTimeSeries("bid_1", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
+    .addTimeSeries("bid_2", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
+    .addTimeSeries("bid_3", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
+    .addTimeSeries("ask_1", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
+    .addTimeSeries("ask_2", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
+    .addTimeSeries("ask_3", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
+    */
+    /*
+    .addPanel("Equity")
+    .addTimeSeries("equity", "Equity")
+    .addTimeSeries("buy_and_hold", "Buy&Hold")
+    */
+    .addPanel("Balances", "Portfolio")
+    .addTimeSeries("cash", "Balances")
+    .addTimeSeries("position", "Balances", _.setAxis(2))
+  )
+
 }

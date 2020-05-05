@@ -31,13 +31,15 @@ import scala.reflect.ClassTag
   *
   * @param engine the TradingEngine which serves as the entry point to the FlashbotSystem
   *               this client is connecting to.
+  * @param defaultTimeout the default timeout to use for akka.ask, waiting for async operations to complete
   * @param skipTouch whether to immediately return from the FlashbotClient constructor, even
   *                  if the [[engine]] has not yet responded to ping. The default is to block
   *                  until the engine responds so that it's guaranteed to be initialized by
   *                  the time the constructor returns.
   */
-class FlashbotClient(engine: ActorRef, skipTouch: Boolean = false) {
+class FlashbotClient(engine: ActorRef, defaultTimeout: Timeout = Timeout(60 seconds), skipTouch: Boolean = false) {
 
+  implicit val timeout = defaultTimeout
   protected val log = Logger.apply(this.getClass)
 
   /**

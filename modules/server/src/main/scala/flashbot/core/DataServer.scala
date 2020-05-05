@@ -236,7 +236,7 @@ class DataServer(dbConfig: Config,
 
           // TODO: this should probably be ordered by: (bundle_id descending and seqId ascending) OR probably better time & seqId beause bundle_id is not necesarrily ordered !
           //joined = historical.concat(live).via(dropUnordered(MarketData.orderBySequence[T]))
-          joined = historical.concat(live).via(dropUnordered(MarketData.orderByTimeAndSeqId[T]))
+          joined = historical.concat(live.alsoTo(Sink.foreach(s => println(s"Live: $s")))).via(dropUnordered(MarketData.orderByTimeAndSeqId[T]))
           // .alsoTo(Sink.foreach(println))
 
         } yield takeLimit match {

@@ -240,7 +240,7 @@ object GrafanaDashboard {
         .add(field, value).asJson.noNulls)
 
     def withParam(name: String, jsonType: String, required: Boolean) = {
-      val obj = decode[JsonObject](target).toOption.getOrElse(JsonObject())
+      val obj = decode[JsonObject](data).toOption.getOrElse(JsonObject())
       val params = obj("params").flatMap(_.asObject).getOrElse(JsonObject())
       val newParams = params.add(name, JsonObject(
         "value" -> ("${" + name + ":json}").asJson,
@@ -334,7 +334,7 @@ object GrafanaDashboard {
     "", hide = false, "A", Json.obj("key" -> key.asJson, "type" -> "table".asJson).noNulls,
     "table", Some(""), Some("table"), Some(1))*/
 
-  def mkGraphTarget(key: String): Target = Target(Json.obj("key" -> key.asJson, "type" -> "time_series".asJson).noNulls, false, "A", key, "timeseries", None, None, None) /*Target(
+  def mkGraphTarget(key: String): Target = Target(Json.obj("key" -> key.asJson, "type" -> "time_series".asJson).noNulls, false, "A", key, "time_series", None, None, None) /*Target(
     "", hide = false, "A", Json.obj("key" -> key.asJson, "type" -> "time_series".asJson).noNulls,
     "timeseries", None, None, None)*/
 }

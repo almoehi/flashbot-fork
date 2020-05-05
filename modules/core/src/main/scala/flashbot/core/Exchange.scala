@@ -34,7 +34,7 @@ abstract class Exchange {
 
   def instruments: Future[Set[Instrument]] = Future.successful(Set.empty)
 
-  def genOrderId: String = randomUUID.toString
+  def genOrderId: String = "_" + randomUUID.toString // locally generated IDs start with "_"
 
 //  protected[flashbot] def _order(id: String, cmd: PostOrderCommand): Unit = {
 //    handleResponse(order(cmd))

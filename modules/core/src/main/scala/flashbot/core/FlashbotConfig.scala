@@ -97,8 +97,15 @@ object FlashbotConfig {
   }
 
   @ConfiguredJsonCodec(decodeOnly = true)
+  case class BacktestConfig(defaultReportTargetAsset: Option[String], defaultPortfolio: Option[String], defaultMarket: Option[String]) {
+    def market = defaultPortfolio.map(Market(_))
+  }
+
+  @ConfiguredJsonCodec(decodeOnly = true)
   case class GrafanaConfig(dataSource: Boolean, dataSourcePort: Int,
-                           host: String, apiKey: Option[String], requestTimeout: Option[FiniteDuration] = Some((60 seconds)))
+                           host: String, apiKey: Option[String],
+                           backtest: BacktestConfig,
+                           requestTimeout: Option[FiniteDuration] = Some((60 seconds)))
 
   @ConfiguredJsonCodec(decodeOnly = true)
   case class DataSourceConfig(`class`: String, datatypes: Option[Seq[String]])

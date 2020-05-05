@@ -191,9 +191,11 @@ object GrafanaServer extends LazyLogging {
         req.entity match {
           case strict: HttpEntity.Strict =>
             logger.error(s"Request to ${req.uri} could not be handled {} {}", keyValue("message", msg), keyValue("body", strict.data.utf8String), t)
+            t.printStackTrace()
             complete(HttpResponse(InternalServerError, entity = s"Json parse error: $msg"))
           case _ =>
             logger.error(s"Request to ${req.uri} could not be handled {}", keyValue("message", msg), t)
+            t.printStackTrace()
             complete(HttpResponse(InternalServerError, entity = s"Json parse error: $msg"))
         }
       }
@@ -205,9 +207,11 @@ object GrafanaServer extends LazyLogging {
         req.entity match {
           case strict: HttpEntity.Strict =>
             logger.error(s"Request to ${req.uri} could not be handled {} {} {}", keyValue("message", m), keyValue("path", path), keyValue("body", strict.data.utf8String), t)
+            t.printStackTrace()
             complete(HttpResponse(InternalServerError, entity = s"Json parse error: $m"))
           case _ =>
             logger.error(s"Request to ${req.uri} could not be handled {} {}", keyValue("message", m), keyValue("path", path), t)
+            t.printStackTrace()
             complete(HttpResponse(InternalServerError, entity = s"Json parse error: $m"))
         }
       }
@@ -323,7 +327,9 @@ object GrafanaServer extends LazyLogging {
                             _.volume.toArray, scaleTo(0, 1)))
                         )
                     case (_, _, _, None) => Future.successful(Seq.empty)
-                    case _ => Future.failed(new IllegalArgumentException("missing or wrong parameters"))
+                    case other =>
+                      logger.error(s"missing or wrong parameters: {}", other)
+                      Future.failed(new IllegalArgumentException("missing or wrong parameters"))
                   }
 
                 case Failure(exception) => Future.failed(exception)

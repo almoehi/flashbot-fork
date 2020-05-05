@@ -37,7 +37,7 @@ class Report(val strategy: String,
   def getCollections: Map[String, Buffer[Json]] = collections.iterator().toMap
   def getTimeSeries: Map[String, CandleFrame] = timeSeries.iterator().toMap
   def getValues: Map[String, ReportValue[Any]] = values.iterator().toMap
-  def getTrades: Iterable[TradeEvent] = trades.elems
+  def getTrades: Iterable[TradeEvent] = trades.elems.filterNot(_ == null)
 
   override protected def _step(delta: ReportEvent): Report = delta match {
     case ev: TradeEvent =>

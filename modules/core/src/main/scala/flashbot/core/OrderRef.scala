@@ -17,7 +17,7 @@ abstract class OrderRef {
   protected[flashbot] var _tag: String = ""
   final def tag: String = _tag
 
-  lazy val id: String = randomUUID.toString
+  lazy val id: String = "_" + randomUUID.toString
 
   val children = new OrderIndex
 

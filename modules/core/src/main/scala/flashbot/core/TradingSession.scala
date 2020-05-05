@@ -1,5 +1,6 @@
 package flashbot.core
 
+import java.time.Instant
 import java.util
 
 import akka.{Done, NotUsed}
@@ -8,7 +9,7 @@ import akka.event.LoggingAdapter
 import akka.stream.{KillSwitches, Materializer, OverflowStrategy, SharedKillSwitch}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import flashbot.core.Report.ReportError
-import flashbot.core.{BuiltInOrder}
+import flashbot.core.BuiltInOrder
 import flashbot.core.ReportEvent.{SessionFailure, SessionSuccess}
 import flashbot.core.TradingSession.{DataStream, SessionSetup}
 import flashbot.models._
@@ -19,7 +20,7 @@ import io.circe.Json
 import io.circe.syntax._
 import akka.pattern.ask
 import flashbot.core.Instrument.CurrencyPair
-
+import flashbot.util.time._
 import scala.annotation.tailrec
 import scala.concurrent._
 import scala.util.{Failure, Success, Try}
@@ -79,6 +80,39 @@ class TradingSession(val strategyKey: String,
     order.ctx = this
     order.parent = this.scope
     currentOrderIndex.insert(order)
+
+    // TODO: check, if this is the right place to do this
+    // register callbacks to handle portfolio update
+    // we somehow need to update the portfolio here, to adjust balances according to placed/filled/canceled orders
+
+    /*
+    val cost = portfolio.getOrderCostSize(market, size, price, Maker)
+
+      // Determine the account which the cost is in terms of.
+      val account = Account(market.exchange, cost.security)
+
+      // Now get the available balance of that account.
+      val balance = portfolio.getAvailableBalance(account)
+
+    order match {
+      case o:BuiltInOrder =>
+        // portfolio.updateAssetBalance should be adjusted for all placed orders, to make sure we're not placing new orders with "locked-in" balances
+
+        order.onReceived(open => portfolioRef.update(this, _.addOrder(Some(open.orderId), o.market, o.size, o.price)(instruments,exchangeParams)))
+        order.onError(open => portfolioRef.update(this, _.removeOrder(o.market, open.orderId)))
+        order.onDone{_ match {
+          case OrderDone(id, product, side, Canceled, price, remaining) =>
+            portfolioRef.update(this, _.removeOrder(o.market, id))
+          case OrderDone(id, product, side, Filled, price, remaining) =>
+            val cost = getPortfolio.getOrderCost(o.market, 0, price, Order)
+            val fill = Fill(id, None, )
+            portfolioRef.update(this, _.fillOrder(Some(open.orderId), o.market, open.size, open.price)(instruments,exchangeParams))
+        }
+
+        }
+      case _ => // ignore
+    }
+    */
 
     // Invoke the submit logic of the order
     order.handleSubmit()
@@ -173,6 +207,8 @@ class TradingSession(val strategyKey: String,
   private var strategy: Strategy[_] = _
 
   private def processTick(tick: Tick): Unit = {
+    val now = Instant.now.micros
+
     seqNr = seqNr + 1
     tick match {
       case md: MarketData[_] =>
@@ -182,7 +218,7 @@ class TradingSession(val strategyKey: String,
       case callback: Callback =>
         callback.fn.run()
 
-      // TODO: emit also to Report ?
+
       case req: SimulatedRequest =>
         req.exchange.simulateReceiveRequest(scheduler.currentMicros, req)
 
@@ -191,6 +227,17 @@ class TradingSession(val strategyKey: String,
         val order = event match {
           case r: OrderReceived => findOrder(r.clientOid)
           case o => findOrder(o.orderId)
+        }
+
+        order match {
+          case Some(o:BuiltInOrder) => event match {
+            // trade is completed, if referenced order has been filled
+            case OrderDone(id, product, side, Filled, Some(price), remainingSize) =>
+              emitReportEvent(ReportEvent.TradeEvent(Some(id), o.market.exchange, o.market.symbol, now, price, o.size))
+            case _ => // ignore
+          }
+
+          case _ => // ignore
         }
 
         strategy.onEvent(event)
@@ -209,7 +256,7 @@ class TradingSession(val strategyKey: String,
   private var completeFut: Option[Future[Done]] = None
   def future: Future[Done] = this.synchronized {
     if (completeFut.isEmpty)
-      throw new RuntimeException("Session has not started yet.")
+      throw new RuntimeException("TradingSession has not started yet.")
     completeFut.get
   }
 
@@ -217,7 +264,7 @@ class TradingSession(val strategyKey: String,
     * The main method. It will never run more than once per session instance.
     */
   protected[flashbot] def start(): Future[SessionSetup] = this.synchronized {
-    assert(completeFut.isEmpty, "Session already started")
+    assert(completeFut.isEmpty, "TradingSession already started")
 
     log.info(s"TradingSession start ${this}")
     val theId = java.util.UUID.randomUUID().toString
@@ -272,7 +319,7 @@ class TradingSession(val strategyKey: String,
         killSwitch.put(Some(ks))
       }
     } yield {
-      log.debug(s"Session init completed $setup")
+      log.debug(s"TradingSession init completed $setup")
       (setup, tickStream)
     }
 
@@ -322,7 +369,7 @@ class TradingSession(val strategyKey: String,
         case Success(_) =>
           scheduler.fastForward(Long.MaxValue, processTick)
         case other =>
-          log.debug(s"mainLoop result: $other")
+          log.debug(s"TradingSession mainLoop result: $other")
       }
     } yield done
 
@@ -367,7 +414,7 @@ class TradingSession(val strategyKey: String,
 
     val exchangeConfigs = loader.getExchangeConfigs()
 
-    log.debug("Exchange configs: {}", exchangeConfigs)
+    //log.debug("Exchange configs: {}", exchangeConfigs)
 
     // Set the time. Using system time just this once.
     val sessionStartMicros = System.currentTimeMillis() * 1000
@@ -387,7 +434,7 @@ class TradingSession(val strategyKey: String,
           else new Simulator(plainInstance, this)
         })
 
-    log.debug("Starting async setup")
+    log.debug("TradingSession starting async setup")
 
     def loadStrat[T <: StrategyParams](clazz: String): Future[Strategy[T]] = for {
       // Load the strategy
@@ -437,17 +484,17 @@ class TradingSession(val strategyKey: String,
       exchangeNames: Set[String] = Some(strategy.requiresFiatRates).filter(_ == true).map(_ => Set("fiat")).getOrElse(Set.empty) ++
         paths.toSet[DataPath[_]].map(_.source)
           .intersect(exchangeConfigs.keySet)
-      _ = { log.debug("Loading exchanges: {}.", exchangeNames) }
+      _ = { log.debug("TradingSession loading exchanges: {}.", exchangeNames) }
 
       exchanges: Map[String, Exchange] <- Future.sequence(exchangeNames.map(n =>
         loadExchange(n).map(n -> _).toFut)).map(_.toMap)
-      _ = { log.debug("Loaded exchanges: {}.", exchanges) }
+      _ = { log.debug("TradingSession loaded exchanges: {}.", exchanges) }
 
       // Resolve market data streams.
       streams <- Future.sequence(paths.map(path =>
         strategy.resolveMarketData(dataSelection(path), dataServer, dataOverrides)))
 
-      _ = { log.debug("Resolved {} market data streams out of" +
+      _ = { log.debug("TradingSession resolved {} market data streams out of" +
         " {} paths requested by the strategy.", streams.size, paths.size) }
 
       // fetch current fiat rates from exchange associated by "fiat" key
@@ -457,7 +504,7 @@ class TradingSession(val strategyKey: String,
         case Some(fEx) if fEx.isInstanceOf[HasFiatRates] =>
           fEx.asInstanceOf[HasFiatRates].fiatRates(instruments.byExchange("fiat").map(_.symbol))
         case other =>
-          log.warning(s"No FIAT exchange configured to fetch fiat rates! {}", other)
+          log.warning(s"TradingSession has no FIAT exchange configured to fetch fiat rates! {}", other)
           Future.successful(Map.empty[CurrencyPair,Double])
       }
 

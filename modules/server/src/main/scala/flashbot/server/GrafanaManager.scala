@@ -4,6 +4,7 @@ import akka.Done
 import akka.actor.{Actor, ActorLogging}
 import akka.http.scaladsl.model.ContentTypes
 import GrafanaDashboard._
+import flashbot.core.FlashbotConfig.BacktestConfig
 import flashbot.util._
 import flashbot.util.json._
 import io.circe.parser._
@@ -37,11 +38,12 @@ import scala.util.{Failure, Success}
   *      displays it as "off".
   */
 class GrafanaManager(host: String, apiKey: String, dataSourcePort: Int,
-                     loader: EngineLoader) extends Actor with ActorLogging {
+                     loader: EngineLoader, backtestConfig: BacktestConfig) extends Actor with ActorLogging {
 
   implicit val ec: ExecutionContext = context.system.dispatcher
   implicit val okHttpBackend = OkHttpFutureBackend()
 
+  private val defaultPortfolioString = backtestConfig.defaultPortfolio.getOrElse("coinbase.usd=5000")
   private case object Init
 
   context.system.scheduler.scheduleOnce(1 second, self, Init)
@@ -60,7 +62,7 @@ class GrafanaManager(host: String, apiKey: String, dataSourcePort: Int,
               mkTemplate("market")
                 .withLabelledOptions(markets.map(x => (x.toString, x.label)):_*)
                 .fallbackSelected(markets
-                  .find(m => m.exchange.toLowerCase == "coinbase" && m.symbol == "btc_eur")
+                  .find(m => m.exchange.toLowerCase == backtestConfig.market.map(_.exchange).getOrElse("coinbase") && m.symbol == backtestConfig.market.map(_.symbol).getOrElse("btc_eur"))
                   .orElse(markets.headOption)
                   .map(_.toString))
                 .copy(hide = 1))
@@ -87,15 +89,18 @@ class GrafanaManager(host: String, apiKey: String, dataSourcePort: Int,
               info.layout.buildDashboard(_).withTag("backtest")
                 .withTemplate(mkInterval())
                 .withTemplate(mkTemplate("portfolio", "textbox", label = Some("Portfolio"))
-                  .withOptions("coinbase.usd=5000")
-                  .withSelected("coinbase.usd=5000"))
+                  .withOptions(defaultPortfolioString)
+                  .withSelected(defaultPortfolioString))
                 .withJsonSchemaTemplates(info.jsonSchema.get)
-                .mapPanels(_.mapTargets(
-                  _.withField("bar_size")
+                .mapPanels(p => p.mapTargets { t =>
+                  t.withField("bar_size")
                     .withField("portfolio")
                     .withField("strategy", strategy.asJson)
-//                    .withField("params", ???)
-                ))
+                    .withField("key", t.target.asJson)
+                    .withField("type", t.`type`.asJson)
+                    .withField("market")
+                  //                    .withField("params", ???)
+                })
             )
         })
 
