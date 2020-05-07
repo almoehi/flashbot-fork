@@ -21,10 +21,11 @@ class ExchangeRatesApiIO(implicit val system: ActorSystem,
   lazy val log = system.log
   implicit val ec = system.dispatcher
 
+  val params = new ExchangeParams(null, new java.util.HashMap[String, InstrumentParams]())
+
   override def order(req: PostOrderRequest) = ???
 
   override def cancel(id: String, pair: Instrument) = ???
-
 
   override def baseAssetPrecision(pair: Instrument): Int = 5
 
