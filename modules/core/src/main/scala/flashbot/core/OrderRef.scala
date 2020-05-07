@@ -2,7 +2,7 @@ package flashbot.core
 
 import flashbot.models._
 import flashbot.models.OrderCommand.{PostLimitOrder, PostMarketOrder, PostOrderCommand}
-import flashbot.models.Order.{Buy, Sell, Side}
+import flashbot.models.Order.{Buy, Liquidity, Maker, Sell, Side, Taker}
 import flashbot.util.NumberUtils
 import java.util.UUID.randomUUID
 
@@ -24,12 +24,12 @@ abstract class OrderRef {
   // Will be set by the session
   protected[flashbot] var seqNr: Long = -1
 
-  final private lazy val tagWithSeqNr: String =
+  final private def tagWithSeqNr: String =
     if (!tag.isEmpty && seqNr == 0) tag
     else if (!tag.isEmpty) s"$tag-$seqNr"
     else seqNr.toString
 
-  final lazy val key: String =
+  final def key: String =
     if (parent == null) tagWithSeqNr
     else s"${parent.key}/$tagWithSeqNr"
 
@@ -166,6 +166,9 @@ sealed abstract class BuiltInOrder extends OrderRef {
   def market: Market
   def side: Side
   def size: Double
+  def liquidity: Liquidity
+
+  def toOrder: Order
 
   final lazy val exchange = ctx.exchanges(market.exchange)
   override final lazy val id: String = exchange.genOrderId
@@ -205,6 +208,7 @@ sealed abstract class BuiltInOrder extends OrderRef {
         maybeOrderId.filterNot(_ => exchangeId == null).map{
           exchangeId = _
         }
+
       case Success(RequestError(cause: ExchangeError)) =>
         ctx.emit(CancelError(id, market.symbol, cause))
 
@@ -222,6 +226,11 @@ class LimitOrder(val market: Market,
                  val price: Double,
                  val postOnly: Boolean = false) extends BuiltInOrder {
   override def submitCmd = LimitOrderRequest(id, side, ctx.instruments(market), size, price, postOnly)
+  override def toOrder: Order = Order(this.id, side, size, Some(price))
+  override def liquidity: Liquidity = postOnly match {
+    case true => Maker
+    case _ => Taker
+  }
 }
 
 class MarketOrder(val market: Market,
@@ -233,6 +242,10 @@ class MarketOrder(val market: Market,
   }
 
   override def submitCmd = MarketOrderRequest(id, side, ctx.instruments(market), size)
+
+  override def toOrder: Order = Order(this.id, side, size, None)
+
+  override def liquidity: Liquidity = Taker
 
   override def handleCancel(): Unit =
     throw new UnsupportedOperationException("Market orders do not support cancellations.")
