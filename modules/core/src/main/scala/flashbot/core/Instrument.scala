@@ -35,6 +35,8 @@ trait Instrument {
 
   override def toString: String = symbol
 
+  def pnl(size: Double, entryPrice: Double, exitPrice: Double): Double
+
   // TODO:
   // def tickSize: Double
 
@@ -79,6 +81,8 @@ object Instrument {
 //      }
 //    }
 
+    def pnl(size: Double, entryPrice: Double, exitPrice: Double): Double = (exitPrice - entryPrice) * size
+
     override def valueDouble(price: Double): Double = price
     //override def tickSize: Double = ???
   }
@@ -118,6 +122,7 @@ object Instrument {
 
     override def valueDouble(price: Double) = ???
 
+    def pnl(size: Double, entryPrice: Double, exitPrice: Double): Double = ???
     //override def tickSize: Double = ???
   }
 
