@@ -1,5 +1,6 @@
 package flashbot.models
 
+import flashbot.core.Instrument
 import flashbot.core.Instrument.Derivative
 import io.circe.{Decoder, Encoder}
 
@@ -18,7 +19,7 @@ class Position(var size: Double, var leverage: Double, var entryPrice: Double) {
     * Updates the position size and average entry price.
     * Returns the new position and any realized PNL that occurred as a side effect.
     */
-  def updateSize(newSize: Double, instrument: Derivative, price: Double): (Position, Double) = {
+  def updateSize(newSize: Double, instrument: Instrument, price: Double): (Position, Double) = {
 
     // First stage, close existing positions if necessary. Record PNL.
     var pnl = 0d
@@ -45,8 +46,15 @@ class Position(var size: Double, var leverage: Double, var entryPrice: Double) {
   def isLong: Boolean = size > 0
   def isShort: Boolean = size < 0
 
-  def initialMargin(instrument: Derivative): Double =
-    instrument.valueDouble(entryPrice) * size.abs / leverage
+  def initialMargin(instrument: Instrument): Double = instrument match {
+    case instr:Derivative =>
+      instr.valueDouble(entryPrice) * size.abs / leverage
+    case instr:Instrument => // leverge == 1.0
+      assert(leverage == 1.0, s"leverage for non-derivative instrument ($instr) should be 1")
+      instr.valueDouble(entryPrice) * size.abs / leverage
+    case _ => 0d
+  }
+
 
   def isInitialized: Boolean = java.lang.Double.isNaN(entryPrice)
 
