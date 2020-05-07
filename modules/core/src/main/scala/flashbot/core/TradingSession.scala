@@ -272,14 +272,17 @@ class TradingSession(val strategyKey: String,
               }
 
               emitReportEvent(ReportEvent.PriceEvent(order.market,  price, micros))
-              val fill = Fill(order.id, Some(tradeId), fee, product, price, size, micros, liquidity, side)
+              val fill = Fill(order.id, Some(tradeId), fee, product, price, size.abs, micros, liquidity, side)
               portfolioRef.update(this,_.fillOrder(order.market, fill)(instruments,exchangeParams))
 
 
             // filled order, trade completed !
             case OrderDone(id, product, side, Filled, maybePrice, maybeRemainingSize) =>
               // TODO: why does OrderDone not include a 'micros' field ?
-              emitReportEvent(ReportEvent.TradeEvent(Some(id), order.market.exchange, order.market.symbol, if (scheduler.currentMicros < 0) now else scheduler.currentMicros, maybePrice, if (Side == Sell) -order.size else order.size))
+              emitReportEvent(ReportEvent.TradeEvent(Some(id), order.market.exchange, order.market.symbol,
+                if (scheduler.currentMicros < 0) now else scheduler.currentMicros,
+                maybePrice,
+                if (Side == Sell) -order.size else order.size))
 
             // canceled order
             case OrderDone(id, product, side, Canceled, _, remainingSize) =>
