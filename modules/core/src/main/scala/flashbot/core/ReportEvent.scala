@@ -39,7 +39,7 @@ object ReportEvent {
                         exchange: String,
                         product: String,
                         micros: Long,
-                        price: Double,
+                        price: Option[Double],
                         size: Double) extends ReportEvent with Timestamped
 
   @JsonCodec
