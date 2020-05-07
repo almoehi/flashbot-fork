@@ -9,10 +9,11 @@ import akka.event.LoggingAdapter
 import akka.stream.{KillSwitches, Materializer, OverflowStrategy, SharedKillSwitch}
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import flashbot.core.Report.ReportError
-import flashbot.core.BuiltInOrder
+import flashbot.core.{BuiltInOrder, ContinuousQuote, LimitOrder, MarketOrder, OrderRef}
 import flashbot.core.ReportEvent.{SessionFailure, SessionSuccess}
 import flashbot.core.TradingSession.{DataStream, SessionSetup}
 import flashbot.models._
+import flashbot.models.Order._
 import flashbot.server.{ServerMetrics, Simulator}
 import flashbot.util._
 import flashbot.util.time.FlashbotTimeout
@@ -20,7 +21,9 @@ import io.circe.Json
 import io.circe.syntax._
 import akka.pattern.ask
 import flashbot.core.Instrument.CurrencyPair
+import flashbot.models.Order.{Buy, Liquidity, Maker, Sell, Taker, TickDirection}
 import flashbot.util.time._
+
 import scala.annotation.tailrec
 import scala.concurrent._
 import scala.util.{Failure, Success, Try}
@@ -81,9 +84,17 @@ class TradingSession(val strategyKey: String,
     order.parent = this.scope
     currentOrderIndex.insert(order)
 
-    // TODO: check, if this is the right place to do this
-    // register callbacks to handle portfolio update
-    // we somehow need to update the portfolio here, to adjust balances according to placed/filled/canceled orders
+
+    order match {
+      case o:LimitOrder =>
+        portfolioRef.update(this,_.addOrder(Some(o.id), o.market, o.size, o.price)(instruments,exchangeParams))
+      case o:MarketOrder =>
+        portfolioRef.update(this,_.addOrder(Some(o.id), o.market, o.size, Double.NaN)(instruments,exchangeParams))
+        //emitReportEvent(ReportEvent.TradeEvent(Some(id), order.market.exchange, order.market.symbol, now, price, order.size))
+
+        //emitReportEvent(ReportEvent.PutValueEvent("orders", "order", o.toOrder.asJson))
+    }
+
 
     /*
     val cost = portfolio.getOrderCostSize(market, size, price, Maker)
@@ -114,6 +125,10 @@ class TradingSession(val strategyKey: String,
     }
     */
 
+    // remove from index if: done (canceled or filled), on error
+    order.onDone(o => currentOrderIndex.remove(order.ctx.scope))
+    order.onError(o => currentOrderIndex.remove(order.ctx.scope))
+
     // Invoke the submit logic of the order
     order.handleSubmit()
 
@@ -122,10 +137,16 @@ class TradingSession(val strategyKey: String,
 
   // Initialize an order and invoke it's submit method.
   def submit(order: OrderRef): OrderRef = {
-    submit("", order)
+    submit("default", order)
   }
 
   def cancel(order: OrderRef): Unit = {
+    order match {
+      case o:BuiltInOrder =>
+        portfolioRef.update(this,_.removeOrder(o.market, o.id))
+      case _ => //
+    }
+
     order.handleCancel()
   }
 
@@ -223,6 +244,7 @@ class TradingSession(val strategyKey: String,
         req.exchange.simulateReceiveRequest(scheduler.currentMicros, req)
 
       // TODO: emit also to Report to maintain a list of placed/received/canceled orders which should be recorded as events in a time-series
+      // TODO: update portfolio positions and orders
       case event: OrderEvent =>
         val order = event match {
           case r: OrderReceived => findOrder(r.clientOid)
@@ -230,14 +252,48 @@ class TradingSession(val strategyKey: String,
         }
 
         order match {
-          case Some(o:BuiltInOrder) => event match {
-            // trade is completed, if referenced order has been filled
-            case OrderDone(id, product, side, Filled, Some(price), remainingSize) =>
-              emitReportEvent(ReportEvent.TradeEvent(Some(id), o.market.exchange, o.market.symbol, now, price, o.size))
+          case Some(order:BuiltInOrder) => event match {
+
+            case OrderReceived(orderId, product, clientOid, tpe) =>
+
+
+            case OrderOpen(orderId, product, price, size, side) =>
+
+
+            // update portfolio positions by filling orders
+            case _o @ OrderMatch(tradeId, product, micros, size, price, direction, makerOrderId, takerOrderId) =>
+
+              val liquidity: Liquidity = order.liquidity
+              val side = (if (direction == Up) Buy else Sell)
+
+              val fee = liquidity match {
+                case Maker => exchangeParams.get(order.market.exchange).makerFee(product)
+                case Taker => exchangeParams.get(order.market.exchange).takerFee(product)
+              }
+
+              emitReportEvent(ReportEvent.PriceEvent(order.market,  price, micros))
+              val fill = Fill(order.id, Some(tradeId), fee, product, price, size, micros, liquidity, side)
+              portfolioRef.update(this,_.fillOrder(order.market, fill)(instruments,exchangeParams))
+
+
+            // filled order, trade completed !
+            case OrderDone(id, product, side, Filled, maybePrice, maybeRemainingSize) =>
+              // TODO: why does OrderDone not include a 'micros' field ?
+              emitReportEvent(ReportEvent.TradeEvent(Some(id), order.market.exchange, order.market.symbol, if (scheduler.currentMicros < 0) now else scheduler.currentMicros, maybePrice, if (Side == Sell) -order.size else order.size))
+
+            // canceled order
+            case OrderDone(id, product, side, Canceled, _, remainingSize) =>
+              portfolioRef.update(this,_.removeOrder(order.market, id))
+
+            case OrderChange(orderId, product, price, newSize) =>
+
+            case err:OrderError =>
+              portfolioRef.update(this,_.removeOrder(order.market, err.orderId))
+
             case _ => // ignore
           }
 
-          case _ => // ignore
+          case _ => // ignore, e.g. ContinousQuote
         }
 
         strategy.onEvent(event)
@@ -431,7 +487,7 @@ class TradingSession(val strategyKey: String,
         .map(plainInstance => {
           // Wrap it in our Simulator if necessary.
           if (mode == Live) plainInstance
-          else new Simulator(plainInstance, this)
+          else new Simulator(name, plainInstance, this)
         })
 
     log.debug("TradingSession starting async setup")

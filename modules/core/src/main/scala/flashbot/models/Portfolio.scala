@@ -1,5 +1,7 @@
 package flashbot.models
 
+import java.util.UUID
+
 import flashbot.core.DeltaFmt.HasUpdateEvent
 import flashbot.core.Instrument.Derivative
 import flashbot.core._
@@ -107,8 +109,12 @@ class Portfolio(private val assets: debox.Map[Account, Double],
         lastCostAccount = market.settlementAccount
         // For derivatives, the order cost is the difference between the order margin
         // with the order and without.
-        (addOrder(None, market, size, price).getOrderMargin(market) -
-          getOrderMargin(market)) * (1.0 + fee)
+
+        // TODO: remove order right after ?
+        val id = "tmp_" + UUID.randomUUID().toString
+        (addOrder(Some(id), market, size, price).getOrderMargin(market) -
+          removeOrder(market, id).getOrderMargin(market)) * (1.0 + fee)
+
 
       case _ =>
         // For non-derivatives, there is no margin.
@@ -147,6 +153,11 @@ class Portfolio(private val assets: debox.Map[Account, Double],
         case _ => 0d // TODO: check if this is a valid default value !!!
       }
 
+      case instr: Instrument => positions.get(market) match {
+        case Some(pos) => pos.size
+        case _ => 0d
+      }
+      case _ => 0d
     }
   }
 
@@ -157,10 +168,12 @@ class Portfolio(private val assets: debox.Map[Account, Double],
                        (implicit instruments: InstrumentIndex,
                         prices: PriceIndex,
                         metrics: Metrics): Double = {
+    val position = positions(market)
     instruments(market) match {
       case derivative: Derivative =>
-        val position = positions(market)
         position.initialMargin(derivative) + getPositionPnl(market)
+      case instr: Instrument =>
+        position.initialMargin(instr) + getPositionPnl(market)
       case _ => 0d // TODO: check if this is a valid default value
     }
   }
@@ -188,12 +201,16 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     round8(sum)
   }
 
+  def getAvailableBalanceSize(account: Account)
+                         (implicit instruments: InstrumentIndex,
+                          prices: PriceIndex,
+                          metrics: Metrics): FixedSize = getAvailableBalance(account).of(account)
+
   def addOrder(id: Option[String], market: Market, size: Double, price: Double)
               (implicit instrumentIndex: InstrumentIndex,
                exchangeParams: java.util.Map[String, ExchangeParams]): Portfolio = {
     val instr = instrumentIndex(market)
-    var book = orders(market)
-    if (book == null) book = OrderBook(exchangeParams.get(market.exchange).tickSize(market.symbol))
+    var book = orders.get(market).getOrElse(OrderBook(exchangeParams.get(market.exchange).tickSize(market.symbol)))
     val side = if (size > 0) Order.Buy else Order.Sell
 
     _step(OrdersUpdated(market,
@@ -203,10 +220,12 @@ class Portfolio(private val assets: debox.Map[Account, Double],
   }
 
   def removeOrder(market: Market, id: String): Portfolio = {
-    val book = orders.get(market).get
-    if (book != null && book.orders.containsKey(id)) {
-      this._step(OrdersUpdated(market, OrderBook.Done(id)))
+    orders.get(market) match {
+      case Some(book) if book.orders.containsKey(id) =>
+        this._step(OrdersUpdated(market, OrderBook.Done(id)))
+      case _ =>
     }
+
     this
   }
 
@@ -218,28 +237,38 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     // Derivatives will update realized pnl on fills.
     if (positions.contains(market)) {
 
-      // If this fill is opening a position, update the settlement account with the
-      // realized pnl from the fee.
-      val instrument = instruments(market).asInstanceOf[Derivative]
+
+      val instrument = instruments(market) //.asInstanceOf[Derivative]
       val position = positions(market)
       val (newPosition, realizedPnl) =
         position.updateSize(position.size + size, instrument, fill.price)
-      val feeCost = instrument.valueDouble(fill.price) * fill.size * fill.fee
-
-      updateAssetBalance(market.settlementAccount, _ + (realizedPnl - feeCost))
+      //val feeCost = instrument.valueDouble(fill.price) * fill.size * fill.fee
+      val cost = getOrderCost(market, size, fill.price, fill.liquidity)
+      // TODO: verify if this is correct. Don't we have to differantiate between Sell & Buy ?
+      updateAssetBalance(market.settlementAccount, _ + (realizedPnl - cost))
+        .updateAssetBalance(market.securityAccount, _ - cost)
         .withPosition(market, newPosition)
 
     } else {
       val cost = getOrderCost(market, size, fill.price, fill.liquidity)
+      // Open new position.
       // Other instruments update balances and account for fees.
+      val instrument = instruments(market)
+      val pos = new Position(size, 1, fill.price) // TODO: check if leverage==1 is still valid for Derivatives here !
+
+      // If this fill is opening a position, update the settlement account with the
+      // realized pnl from the fee.
+
       fill.side match {
         case Buy =>
           updateAssetBalance(market.settlementAccount, _ - cost)
             .updateAssetBalance(market.securityAccount, _ + fill.size)
+            .withPosition(market,pos)
         case Sell =>
           updateAssetBalance(market.settlementAccount,
               _ + fill.size * fill.price * (1.0 - fill.fee))
             .updateAssetBalance(market.securityAccount, _ - cost)
+            .withPosition(market,pos)
       }
     }
   }
@@ -251,6 +280,9 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     val position = positions(market)
     instruments(market) match {
       case instrument: Derivative =>
+        val price = prices.calcPrice(market.baseAccount, market.quoteAccount)
+        instrument.pnl(position.size, position.entryPrice, price)
+      case instrument: Instrument =>
         val price = prices.calcPrice(market.baseAccount, market.quoteAccount)
         instrument.pnl(position.size, position.entryPrice, price)
     }
@@ -284,6 +316,17 @@ class Portfolio(private val assets: debox.Map[Account, Double],
               val marg = position.initialMargin(instrument)
               if (!assets.contains(account))
                 this.withBalance(account, marg)
+            case instr:Instrument =>
+              val account = Account(market.exchange, instr.settledIn.get)
+              position.entryPrice = price
+              this.withPosition(market, position)
+
+              // If there is no balance for the asset which this position is settled in, then infer
+              // it to be this position's initial margin requirement.
+              val marg = position.initialMargin(instr)
+              if (!assets.contains(account))
+                this.withBalance(account, marg)
+            case _ => this //ignore
           }
       }
     }
