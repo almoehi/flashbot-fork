@@ -404,7 +404,7 @@ class Portfolio(private val assets: debox.Map[Account, Double],
   // This is unsafe because it lets you set a new position without updating account
   // balances with the realized PNL that occurs from changing a position size.
   protected[flashbot] def withPosition(market: Market, position: Position): Portfolio =
-    _step(PositionUpdated(market, Some(position)))
+    _step(PositionUpdated(market, Some(position).filterNot(_.entryPrice.isNaN)))
 
   def merge(portfolio: Portfolio): Portfolio = {
     portfolio.assets.foreach((acc, value) => {
