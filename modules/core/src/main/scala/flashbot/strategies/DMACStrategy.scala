@@ -62,6 +62,15 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
         return
     }
 
+    //println(s"balance: ${balance.amount} ${market.settlementAccount.security} | holding: ${holding.amount} ${market.securityAccount.security} | portfolio: ${portfolio}")
+    println(s"balance: ${balance.amount} ${market.settlementAccount.security} | holding: ${holding.amount} ${market.securityAccount.security}" +
+      s" | availableSettled: ${portfolio.getAvailableBalance(market.settlementAccount)} ${market.settlementAccount.security}" +
+      s" | availableSecurity: ${portfolio.getAvailableBalance(market.securityAccount)} ${market.securityAccount.security}" +
+      s" | orderMargin: ${portfolio.getOrderMargin(market)}" +
+      s" | positionMargin: ${portfolio.getPositionMargin(market)}" +
+      s" | pnl: ${portfolio.getPositionPnl(market)}" +
+      s" | position: ${portfolio.getPosition(market)}"
+    )
     val hasCrossedUp = crossedUp.isSatisfied(index(market))
     val hasCrossedDown = crossedDown.isSatisfied(index(market))
 
@@ -69,6 +78,21 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
 
     recordTimeSeries("position", data.micros,
       portfolio.getBalance(market.securityAccount))
+
+    recordTimeSeries("available_balance_settled", data.micros,
+      portfolio.getAvailableBalance(market.settlementAccount))
+
+    recordTimeSeries("available_balance_security", data.micros,
+      portfolio.getAvailableBalance(market.securityAccount))
+
+    recordTimeSeries("order_margin", data.micros,
+      portfolio.getOrderMargin(market))
+
+    recordTimeSeries("position_margin", data.micros,
+      portfolio.getPositionMargin(market))
+
+    recordTimeSeries("pnl", data.micros,
+      portfolio.getPositionPnl(market))
 
     recordTimeSeries("cash", data.micros,
       portfolio.getBalance(market.settlementAccount))
@@ -87,17 +111,20 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
     // 2% take profit
     val takeProfitTriggered = isLong && price > enteredAt * takeProfit
 
-    if (hasCrossedUp && !isLong) {
+    if (hasCrossedUp && !isLong && balance.amount > 0.0) {
       isLong = true
       enteredAt = price
-      println(s"BUY: ${balance.amount * portfolio.getLeverage(market)}")
-      ctx.submit(new MarketOrder(market, balance.amount * portfolio.getLeverage(market)))
+      val amount = 1 * (balance.amount / price) * portfolio.getLeverage(market)
+      println(s"BUY: ${amount}")
+      ctx.submit(new MarketOrder(market, amount))
+      recordTimeSeries("entry_exit", data.micros, 1)
 
-    } else if (stopLossTriggered || takeProfitTriggered || (hasCrossedDown && isLong)) {
+    } else if (holding.amount > 0.0 &&  (stopLossTriggered || takeProfitTriggered || (hasCrossedDown && isLong))) {
       isLong = false
       enteredAt = -1
       println(s"SELL: ${holding.amount}")
       ctx.submit(new MarketOrder(market, -holding.amount))
+      recordTimeSeries("entry_exit", data.micros, -1)
     }
   }
 
@@ -132,6 +159,7 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
     .addTimeSeries("${market:json}", "Prices")
     .addTimeSeries("smaShort", "Prices")
     .addTimeSeries("smaLong", "Prices")
+    .addTimeSeries("entry_exit", "Prices", _.setAxis(2))
     /*
     .addTimeSeries("fair_price_${fairPriceIndicator}", "Prices")
     .addTimeSeries("bid_1", "Prices", _.setFill(false).setColor("rgba(255,255,255,.2)"))
@@ -148,7 +176,9 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
     */
     .addPanel("Balances", "Portfolio")
     .addTimeSeries("cash", "Balances")
+    .addTimeSeries("available_balance", "Balances")
     .addTimeSeries("position", "Balances", _.setAxis(2))
+    .addTimeSeries("order_margin", "Balances")
   )
 
 }
