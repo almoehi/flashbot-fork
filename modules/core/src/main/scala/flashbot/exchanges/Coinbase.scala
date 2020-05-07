@@ -13,7 +13,8 @@ class Coinbase(implicit val system: ActorSystem,
 //  override def takerFee = 0.003
 //  override def takerFee = -0.00035
 
-  // TODO: should pull this from CoinbasePro API !!
+  // TODO: pull /products from CoinbasePro API and initialize params !!
+  override def instruments: Future[Set[Instrument]] = Future.successful(Set.empty)
 
   override val params: ExchangeParams = {
     new ExchangeParams(
@@ -35,6 +36,9 @@ class Coinbase(implicit val system: ActorSystem,
           tickSize = 0.01
         }})
         put("eth_eur", new InstrumentParams(){{
+          tickSize = 0.01
+        }})
+        put("eth_btc", new InstrumentParams(){{
           tickSize = 0.01
         }})
         put("ltc_eur", new InstrumentParams(){{
