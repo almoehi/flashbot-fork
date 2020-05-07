@@ -11,7 +11,7 @@ import flashbot.models._
 import flashbot.util.NumberUtils
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap
 import it.unimi.dsi.fastutil.objects.{Object2DoubleOpenHashMap, Reference2DoubleOpenHashMap}
-
+import flashbot.core.FixedSize._
 import scala.collection.immutable.Queue
 import scala.collection.mutable
 import scala.collection.JavaConverters._
@@ -24,11 +24,12 @@ import cats.data
   * real exchange as a parameter to use as a base implementation, but it simulates all API
   * interactions so that no network requests are actually made.
   */
-class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) extends Exchange {
+class Simulator(val exchangeName: String, val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0) extends Exchange {
 
   private var myOrders = new java.util.HashMap[String, OrderBook]
   private var depths = new java.util.HashMap[String, Ladder]
   private var prices = debox.Map.empty[String, Double]
+
 
   override protected[flashbot] def marketDataUpdate(md: MarketData[_]): Unit = {
 
@@ -212,6 +213,7 @@ class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0
 
   var tradeCount: Int = 0
 
+
   override protected[flashbot] def simulateReceiveRequest(micros: Long, sreq: SimulatedRequest): Unit = {
     val rsp: ExchangeResponse = sreq.request match {
       /**
@@ -221,12 +223,21 @@ class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0
       case req @ LimitOrderRequest(clientOid, side, product, size, price, postOnly) =>
         val ladder = depths.get(product.symbol)
         val direction = if (side == Buy) Up else Down
+
+        val market = Market(exchangeName,product.symbol)
+        val portfolio = ctx.getPortfolio
+        val available = portfolio.getBalanceSize(market.quoteAccount(ctx.instruments))
+        val totalCost = portfolio.getOrderCostSize(market, size, price, Taker)(ctx.instruments,ctx.exchangeParams)
+        val delta = available.amount - totalCost.amount // check if there is enough available balance in our portfolio, otherwise emit OrderRejectError
+
         if (ladder != null) {
           // If `postOnly` is set, before we mutate the book, check if immediate
           // fills are possible. If so, that's a request error.
           if (postOnly && ladder.hasMatchingPrice(side, price)) {
             // Post only error
             RequestError(OrderRejectedError(req, PostOnlyConstraint))
+          } else if (delta < 0d ) {
+            RequestError(OrderRejectedError(req, InsufficientFunds))
           } else {
             // Emit received event
             ctx.emit(OrderReceived(clientOid, product, clientOid, LimitOrderType))
@@ -259,7 +270,8 @@ class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0
             if (postOnly && isMatch) {
               // Post only error
               RequestError(OrderRejectedError(req, PostOnlyConstraint))
-
+            } else if (delta < 0d ) {
+              RequestError(OrderRejectedError(req, InsufficientFunds))
             } else if (isMatch) {
               // Generate complete immediate fill
               tradeCount += 1
@@ -299,11 +311,23 @@ class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0
             assert(ladder.matchMutable(quoteSide, quoteSide.worst, size) == 0,
               "Non-zero remainder on market order")
             ctx.emit(OrderReceived(clientOid, product, clientOid, MarketOrderType))
+
+            val portfolio = ctx.getPortfolio
+            val available = portfolio.getBalanceSize(Account(exchangeName, product.symbol))
+
+            var total = 0d
             ladder.foreachMatch { (p, q) =>
-              // Emit fill for each match
-              tradeCount += 1
-              ctx.emit(OrderMatch(String.valueOf(tradeCount), product, micros, q, p, direction,
-                s"__anon_$tradeCount", clientOid))
+              // TODO: check if this is valid: are fees incurred for each partial fill ?
+              val totalCost = portfolio.getOrderCostSize(Market(exchangeName,product.symbol), q, p, Taker)(ctx.instruments,ctx.exchangeParams)
+
+              // make sure we're not filling more than there is available balance in our portfolio
+              if (available.amount > total + totalCost.amount) {
+                total += totalCost.amount
+                // Emit fill for each match
+                tradeCount += 1
+                ctx.emit(OrderMatch(String.valueOf(tradeCount), product, micros, q, p, direction,
+                  s"__anon_$tradeCount", clientOid))
+              }
             }
             ctx.emit(OrderDone(clientOid, product, side, Filled, None, None))
             RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
@@ -316,7 +340,28 @@ class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0
             // Emit full fill at current market price
             ctx.emit(OrderReceived(clientOid, product, clientOid, MarketOrderType))
             tradeCount += 1
-            ctx.emit(OrderMatch(String.valueOf(tradeCount), product, micros, size, marketPrice,
+            // make sure, we're not buyingmore than there's balance in our account
+            //val fee = ctx.exchangeParams.get(exchangeName).takerFee(product.symbol)
+            val portfolio = ctx.getPortfolio
+            val market = Market(exchangeName,product.symbol)
+            val available = side match {
+              case Buy => portfolio.getBalanceSize(market.quoteAccount(ctx.instruments))
+              case _ => portfolio.getBalanceSize(market.baseAccount(ctx.instruments))
+            }
+
+            val eps = 1e-8
+
+            val safeSize = side match {
+              case Buy =>
+                val totalCost = portfolio.getOrderCostSize(market, size, marketPrice, Taker)(ctx.instruments,ctx.exchangeParams)
+                val delta = (totalCost.amount-available.amount)
+                if (available.amount > totalCost.amount) size else ((totalCost.amount - delta - eps)/marketPrice)
+              case _ =>
+                val totalCost = portfolio.getOrderCostSize(market, size, marketPrice, Taker)(ctx.instruments,ctx.exchangeParams)
+                val delta = (totalCost.amount-(available.amount/marketPrice))
+                if (available.amount > (totalCost.amount/marketPrice)) size else ((totalCost.amount - delta - eps)/marketPrice)
+            }
+            ctx.emit(OrderMatch(String.valueOf(tradeCount), product, micros, safeSize, marketPrice,
               direction, s"__anon_$tradeCount", clientOid))
             ctx.emit(OrderDone(clientOid, product, side, Filled, None, None))
             RequestSuccess(Some(clientOid)) // re-use clientOid as exchange order ID
@@ -344,6 +389,8 @@ class Simulator(val base: Exchange, ctx: TradingSession, latencyMicros: Long = 0
     val prom = rspPromises.remove(sreq.reqId)
     prom.success(rsp)
   }
+
+  override val params: ExchangeParams = base.params
 
   override def baseAssetPrecision(pair: Instrument): Int = base.baseAssetPrecision(pair)
 

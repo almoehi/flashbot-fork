@@ -134,7 +134,7 @@ abstract class Exchange {
   protected[flashbot] def roundBase(instrument: Instrument)(balance: Double): Double =
     NumberUtils.round(balance, baseAssetPrecision(instrument))
 
-  def params: ExchangeParams = new ExchangeParams(null, new java.util.HashMap[String, InstrumentParams]())
+  def params: ExchangeParams // = new ExchangeParams(null, new java.util.HashMap[String, InstrumentParams]())
 
   protected[flashbot] def marketDataUpdate(md: MarketData[_]): Unit = {
     throw new RuntimeException("marketDataUpdate in base exchange")
