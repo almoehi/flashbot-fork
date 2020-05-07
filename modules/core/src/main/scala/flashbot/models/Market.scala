@@ -6,6 +6,7 @@ import io.circe._
 
 import scala.language.implicitConversions
 
+// e.g. eth_eur
 case class Market(exchange: String, symbol: String) extends Labelled {
   override def toString = s"$exchange.$symbol"
   override def label = {
@@ -14,15 +15,19 @@ case class Market(exchange: String, symbol: String) extends Labelled {
     s"$ex: $sym"
   }
 
+  // eur
   def settlementAccount(implicit instruments: InstrumentIndex): Account =
     Account(exchange, instruments(this).settledIn.get)
 
+  // eth
   def securityAccount(implicit instruments: InstrumentIndex): Account =
     Account(exchange, instruments(this).security.get)
 
+  // eth
   def baseAccount(implicit instruments: InstrumentIndex): Account =
     Account(exchange, instruments(this).base)
 
+  // eur
   def quoteAccount(implicit instruments: InstrumentIndex): Account =
     Account(exchange, instruments(this).quote)
 
