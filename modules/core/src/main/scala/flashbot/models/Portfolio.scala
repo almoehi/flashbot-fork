@@ -72,7 +72,7 @@ class Portfolio(private val assets: debox.Map[Account, Double],
     this
   }
 
-  def getPosition(market: Market): Position = positions(market)
+  def getPosition(market: Market): Position = positions.get(market).getOrElse(new Position(0, 1, Double.NaN))
 
   def getBalance(account: Account): Double = assets.get(account).getOrElse(0d)
   def getBalanceSize(account: Account): FixedSize = getBalance(account).of(account)
@@ -168,13 +168,15 @@ class Portfolio(private val assets: debox.Map[Account, Double],
                        (implicit instruments: InstrumentIndex,
                         prices: PriceIndex,
                         metrics: Metrics): Double = {
-    val position = positions(market)
-    instruments(market) match {
-      case derivative: Derivative =>
-        position.initialMargin(derivative) + getPositionPnl(market)
-      case instr: Instrument =>
-        position.initialMargin(instr) + getPositionPnl(market)
-      case _ => 0d // TODO: check if this is a valid default value
+    positions.get(market) match {
+      case Some(pos) => instruments(market) match {
+        case derivative: Derivative =>
+          pos.initialMargin(derivative) + getPositionPnl(market)
+        case instr: Instrument =>
+          pos.initialMargin(instr) + getPositionPnl(market)
+        case _ => 0d // TODO: check if this is a valid default value
+      }
+      case _ => 0d
     }
   }
 
@@ -245,9 +247,16 @@ class Portfolio(private val assets: debox.Map[Account, Double],
       //val feeCost = instrument.valueDouble(fill.price) * fill.size * fill.fee
       val cost = getOrderCost(market, size, fill.price, fill.liquidity)
       // TODO: verify if this is correct. Don't we have to differantiate between Sell & Buy ?
-      updateAssetBalance(market.settlementAccount, _ + (realizedPnl - cost))
-        .updateAssetBalance(market.securityAccount, _ - cost)
-        .withPosition(market, newPosition)
+
+      fill.side match {
+        case Buy => updateAssetBalance(market.settlementAccount, _ + (realizedPnl - cost))
+          .updateAssetBalance(market.securityAccount, _ - cost)
+          .withPosition(market, newPosition)
+        case Sell => updateAssetBalance(market.settlementAccount, _ + (realizedPnl - (cost*fill.price)))
+          .updateAssetBalance(market.securityAccount, _ - cost)
+          .withPosition(market, newPosition)
+      }
+
 
     } else {
       val cost = getOrderCost(market, size, fill.price, fill.liquidity)
@@ -277,14 +286,16 @@ class Portfolio(private val assets: debox.Map[Account, Double],
                     (implicit prices: PriceIndex,
                      instruments: InstrumentIndex,
                      metrics: Metrics): Double = {
-    val position = positions(market)
-    instruments(market) match {
-      case instrument: Derivative =>
-        val price = prices.calcPrice(market.baseAccount, market.quoteAccount)
-        instrument.pnl(position.size, position.entryPrice, price)
-      case instrument: Instrument =>
-        val price = prices.calcPrice(market.baseAccount, market.quoteAccount)
-        instrument.pnl(position.size, position.entryPrice, price)
+    positions.get(market) match {
+      case Some(position) => instruments(market) match {
+        case instrument: Derivative =>
+          val price = prices.calcPrice(market.baseAccount, market.quoteAccount)
+          instrument.pnl(position.size, position.entryPrice, price)
+        case instrument: Instrument =>
+          val price = prices.calcPrice(market.baseAccount, market.quoteAccount)
+          instrument.pnl(position.size, position.entryPrice, price)
+      }
+      case _ => 0d
     }
   }
 
@@ -308,8 +319,8 @@ class Portfolio(private val assets: debox.Map[Account, Double],
           instruments(market) match {
             case instrument: Derivative =>
               val account = Account(market.exchange, instrument.settledIn.get)
-              position.entryPrice = price
-              this.withPosition(market, position)
+              //position.entryPrice = price
+              this.withPosition(market, position.withEntryPrice(price))
 
               // If there is no balance for the asset which this position is settled in, then infer
               // it to be this position's initial margin requirement.
@@ -318,8 +329,8 @@ class Portfolio(private val assets: debox.Map[Account, Double],
                 this.withBalance(account, marg)
             case instr:Instrument =>
               val account = Account(market.exchange, instr.settledIn.get)
-              position.entryPrice = price
-              this.withPosition(market, position)
+              //position.entryPrice = price
+              this.withPosition(market, position.withEntryPrice(price))
 
               // If there is no balance for the asset which this position is settled in, then infer
               // it to be this position's initial margin requirement.
