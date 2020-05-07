@@ -13,7 +13,7 @@ import io.circe.{Decoder, Encoder}
   *                   that may be used for the initial portfolio in backtests, where we
   *                   don't know the entry price at the time of portfolio creation.
   */
-class Position(var size: Double, var leverage: Double, var entryPrice: Double) {
+case class Position(size: Double, leverage: Double, entryPrice: Double) {
 
   /**
     * Updates the position size and average entry price.
@@ -36,12 +36,14 @@ class Position(var size: Double, var leverage: Double, var entryPrice: Double) {
 
     // Second stage, increase to new size and update entryPrice.
     val enterSize = (newSize - tmpSize).abs
-    entryPrice = (tmpSize * entryPrice + enterSize * price) / (tmpSize + enterSize)
+    val newEntryPrice = (tmpSize * entryPrice + enterSize * price) / (tmpSize + enterSize)
 
-    size = newSize
-
-    (this, pnl)
+    (this.copy(size=newSize,entryPrice = newEntryPrice), pnl)
   }
+
+  def withEntryPrice(price: Double) = this.copy(entryPrice = price)
+  def withSize(sz: Double) = this.copy(size = sz)
+  def withLeverage(l: Double) = this.copy(leverage = l)
 
   def isLong: Boolean = size > 0
   def isShort: Boolean = size < 0
