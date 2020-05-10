@@ -14,7 +14,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 
-case class CandleScannerParams()
+case class CandleScannerParams(reportTargetAsset: String = "usd") extends StrategyParams
 
 class CandleScanner extends Strategy[CandleScannerParams] {
 

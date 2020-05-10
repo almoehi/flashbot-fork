@@ -12,6 +12,7 @@ import io.circe.parser._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import TradeWriter._
+import io.circe.generic.JsonCodec
 import io.circe.{Decoder, Encoder}
 
 import scala.language.postfixOps
@@ -43,9 +44,12 @@ class TradeWriter extends Strategy[Params] {
 }
 
 object TradeWriter {
-  case class Params(trades: Seq[Trade])
+  @JsonCodec
+  case class Params(trades: Seq[Trade], reportTargetAsset: String = "usd") extends StrategyParams
+  /*
   object Params {
     implicit def de: Decoder[Params] = deriveDecoder[Params]
     implicit def en: Encoder[Params] = deriveEncoder[Params]
   }
+   */
 }

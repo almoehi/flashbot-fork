@@ -32,7 +32,7 @@ trait Predictor3[A1, A2, A3, R] {
 }
 
 
-case class LookaheadParams(market: Market, sabotage: Boolean)
+case class LookaheadParams(market: Market, sabotage: Boolean, reportTargetAsset: String = "usd") extends StrategyParams
 object LookaheadParams {
   implicit def lookaheadEncoder: Encoder[LookaheadParams] = deriveEncoder
   implicit def lookaheadDecoder: Decoder[LookaheadParams] = deriveDecoder

@@ -67,7 +67,7 @@ class TestBackfillDataSourceA extends DataSource {
     )
   }
 
-  override protected[flashbot] def backfillTickRate: Int = TestBackfillDataSource.backfillRate
+  override protected[flashbot] def backfillTickRate: Double = TestBackfillDataSource.backfillRate
 }
 
 class TestBackfillDataSourceB extends DataSource {
@@ -105,7 +105,7 @@ class TestBackfillDataSourceB extends DataSource {
     )
   }
 
-  override protected[flashbot] def backfillTickRate: Int = TestBackfillDataSource.backfillRate
+  override protected[flashbot] def backfillTickRate: Double = TestBackfillDataSource.backfillRate
 }
 class TestBackfillDataSourceC extends DataSource {
   import TestBackfillDataSource._
@@ -132,7 +132,7 @@ class TestBackfillDataSourceC extends DataSource {
     )
   }
 
-  override protected[flashbot] def backfillTickRate: Int = TestBackfillDataSource.backfillRate
+  override protected[flashbot] def backfillTickRate: Double = TestBackfillDataSource.backfillRate
 }
 
 // This resembles the Coinbase DataSource implementation
