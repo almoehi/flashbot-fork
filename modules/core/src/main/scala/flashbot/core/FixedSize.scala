@@ -7,12 +7,12 @@ import flashbot.core.AssetKey.implicits._
 import scala.language.implicitConversions
 
 case class FixedSize(amount: Double, security: String) {
-//  lazy val tn: Numeric[BigDecimal] = implicitly[Numeric[BigDecimal]]
-//  import tn._
+  lazy val tn: Numeric[BigDecimal] = implicitly[Numeric[BigDecimal]]
+  import tn._
 
-//  def isEmpty: Boolean = amount equiv tn.fromInt(0)
+  def isEmpty: Boolean = tn.fromInt(0).equiv(amount)
 
-//  def qty: Double = math.abs(tn.toDouble(amount))
+  def qty: Double = math.abs(tn.toDouble(amount))
 
   def side: Side = {
     if (amount > 0) Buy
