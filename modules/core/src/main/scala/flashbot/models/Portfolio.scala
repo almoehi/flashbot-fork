@@ -74,6 +74,11 @@ class Portfolio(private val assets: debox.Map[Account, Double],
 
   def getPosition(market: Market): Position = positions.get(market).getOrElse(new Position(0, 1, Double.NaN))
 
+  /**
+    * get (wallet) balance
+    * @param account
+    * @return
+    */
   def getBalance(account: Account): Double = assets.get(account).getOrElse(0d)
   def getBalanceSize(account: Account): FixedSize = getBalance(account).of(account)
 
@@ -92,7 +97,8 @@ class Portfolio(private val assets: debox.Map[Account, Double],
   /**
     * The initial margin/cost of posting an order PLUS fees. This returns the size of
     * a specific quote asset that would be placed on hold or used towards the order
-    * margin by the exchange.
+    * margin by the exchange. Returns the total cost (price*size + fees).
+    * @return Double
     */
   def getOrderCost(market: Market, size: Double, price: Double, liquidity: Liquidity)
                   (implicit instruments: InstrumentIndex,
@@ -153,8 +159,9 @@ class Portfolio(private val assets: debox.Map[Account, Double],
         case _ => 0d // TODO: check if this is a valid default value !!!
       }
 
+       // TODO: for regular instruments there's no orderMargin, right ?
       case instr: Instrument => positions.get(market) match {
-        case Some(pos) => pos.size
+        case Some(pos) => 0d //pos.size
         case _ => 0d
       }
       case _ => 0d
@@ -172,8 +179,9 @@ class Portfolio(private val assets: debox.Map[Account, Double],
       case Some(pos) => instruments(market) match {
         case derivative: Derivative =>
           pos.initialMargin(derivative) + getPositionPnl(market)
+        // TODO: regular instruments donot have positionMargins, right ?
         case instr: Instrument =>
-          pos.initialMargin(instr) + getPositionPnl(market)
+          0d // pos.initialMargin(instr) + getPositionPnl(market) // leverage is 1.0 for regular instruments
         case _ => 0d // TODO: check if this is a valid default value
       }
       case _ => 0d
@@ -235,12 +243,61 @@ class Portfolio(private val assets: debox.Map[Account, Double],
                (implicit instruments: InstrumentIndex,
                 exchangeParams: java.util.Map[String, ExchangeParams]): Portfolio = {
     val size = if (fill.side == Buy) fill.size else -fill.size
+    val instrument = instruments(market) //.asInstanceOf[Derivative]
 
-    // Derivatives will update realized pnl on fills.
+    positions.get(market) match {
+      // update existing position
+      case Some(position) =>
+        val cost = getOrderCost(market, size, fill.price, fill.liquidity)
+        val (newPosition, realizedPnl) = position.updateSize(position.size + size, instrument, fill.price)
+
+        instrument match {
+          case der:Derivative =>
+            throw new UnsupportedOperationException(s"Portfolio doesn't yet support Derivatives")
+
+          case instr => fill.side match {
+              case Buy => updateAssetBalance(market.settlementAccount, _ - cost)
+                .updateAssetBalance(market.securityAccount, _ + fill.size)
+                .withPosition(market, newPosition)
+              case Sell =>  updateAssetBalance(market.settlementAccount,
+                _ + (fill.size * fill.price) - ((fill.size * fill.price) * fill.fee)) // update balance, accounting for fees
+                .updateAssetBalance(market.securityAccount, _ - cost)
+                .withPosition(market, newPosition)
+          }
+        }
+
+      // open a new position
+      case _ =>
+        val cost = getOrderCost(market, size, fill.price, fill.liquidity)
+
+        instrument match {
+          case der:Derivative =>
+            throw new UnsupportedOperationException(s"Portfolio doesn't yet support Derivatives")
+
+          case instr => fill.side match {
+            case Buy =>
+              val pos = new Position(size, 1, fill.price)
+              updateAssetBalance(market.settlementAccount, _ - cost)
+                .updateAssetBalance(market.securityAccount, _ + fill.size)
+                .withPosition(market,pos)
+            case Sell => // TODO: is this actually a valid edge-case: SELL without any open position ?
+              val pos = new Position(size, 1, fill.price)
+              updateAssetBalance(market.settlementAccount,
+                _ + (fill.size * fill.price) - ((fill.size * fill.price) * fill.fee)) // update balance, accounting for fees TODO: convert to approp. symbol !
+                .updateAssetBalance(market.securityAccount, _ - cost)
+                .withPosition(market,pos)
+          }
+        }
+    }
+
+    /*
+    // update existing position
     if (positions.contains(market)) {
 
 
-      val instrument = instruments(market) //.asInstanceOf[Derivative]
+      // Derivatives will update realized pnl on fills.
+
+
       val position = positions(market)
       val (newPosition, realizedPnl) =
         position.updateSize(position.size + size, instrument, fill.price)
@@ -259,11 +316,15 @@ class Portfolio(private val assets: debox.Map[Account, Double],
 
 
     } else {
+      // open new postion !
       val cost = getOrderCost(market, size, fill.price, fill.liquidity)
       // Open new position.
       // Other instruments update balances and account for fees.
       val instrument = instruments(market)
-      val pos = new Position(size, 1, fill.price) // TODO: check if leverage==1 is still valid for Derivatives here !
+      val pos = instrument match {
+        case der:Derivative => new Position(size, 1, fill.price) // TODO: where does leverage settting come from ?
+        case _ => new Position(size, 1, fill.price)
+      }
 
       // If this fill is opening a position, update the settlement account with the
       // realized pnl from the fee.
@@ -275,13 +336,22 @@ class Portfolio(private val assets: debox.Map[Account, Double],
             .withPosition(market,pos)
         case Sell =>
           updateAssetBalance(market.settlementAccount,
-              _ + fill.size * fill.price * (1.0 - fill.fee))
+              _ + (fill.size * fill.price) - ((fill.size * fill.price) * (1.0 - fill.fee))) // update balance, accounting for fees
             .updateAssetBalance(market.securityAccount, _ - cost)
             .withPosition(market,pos)
       }
     }
+    */
   }
 
+  /**
+    * unrealized PnL
+    * @param market
+    * @param prices
+    * @param instruments
+    * @param metrics
+    * @return
+    */
   def getPositionPnl(market: Market)
                     (implicit prices: PriceIndex,
                      instruments: InstrumentIndex,
