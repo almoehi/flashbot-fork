@@ -30,6 +30,7 @@ class Simulator(val exchangeName: String, val base: Exchange, ctx: TradingSessio
   private var depths = new java.util.HashMap[String, Ladder]
   private var prices = debox.Map.empty[String, Double]
 
+  private val eps = 1e-12 // epsilon for numerical precission/rounding
 
   override protected[flashbot] def marketDataUpdate(md: MarketData[_]): Unit = {
 
@@ -349,7 +350,6 @@ class Simulator(val exchangeName: String, val base: Exchange, ctx: TradingSessio
               case _ => portfolio.getBalanceSize(market.baseAccount(ctx.instruments))
             }
 
-            val eps = 1e-8
 
             val safeSize = side match {
               case Buy =>
