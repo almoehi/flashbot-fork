@@ -58,7 +58,7 @@ case class Position(size: Double, leverage: Double, entryPrice: Double) {
   }
 
 
-  def isInitialized: Boolean = java.lang.Double.isNaN(entryPrice)
+  def isInitialized: Boolean = !java.lang.Double.isNaN(entryPrice)
 
   override def toString: String = Seq(
     size.toString,
