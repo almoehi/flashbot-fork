@@ -1,6 +1,6 @@
 package flashbot.models
 
-import flashbot.core.Tick
+import flashbot.core.{FixedSize, TargetId, Tick}
 import flashbot.models.Order.{Liquidity, Side}
 
 trait TradingSessionEvent
@@ -16,13 +16,14 @@ case class Fill(orderId: String,
                 side: Side) extends Tick
 
 
-//case class LogMessage(message: String) extends TradingSessionEvent
-//case class OrderTarget(market: Market,
-//                       key: String,
-//                       size: FixedSize,
-//                       price: Option[BigDecimal],
-//                       once: Option[Boolean] = None,
-//                       postOnly: Option[Boolean] = None) extends TradingSessionEvent {
-//  def id: TargetId = TargetId(market, key)
-//}
+case class LogMessage(message: String) extends TradingSessionEvent
+
+case class OrderTarget(market: Market,
+                       key: String,
+                       size: FixedSize,
+                       price: Option[BigDecimal],
+                       once: Option[Boolean] = None,
+                       postOnly: Option[Boolean] = None) extends TradingSessionEvent {
+  def id: TargetId = TargetId(market, key)
+}
 
