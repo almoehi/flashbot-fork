@@ -3,6 +3,7 @@ package flashbot.strategies
 import flashbot.core.DataType.{CandlesType, TradesType}
 import flashbot.core._
 import flashbot.core.FixedSize._
+import flashbot.core.AssetKey.implicits._
 import flashbot.models.Order.{Buy, Sell}
 import flashbot.models.{DataPath, Market, Portfolio}
 import io.circe.generic.JsonCodec
@@ -21,7 +22,7 @@ import scala.language.{implicitConversions, postfixOps}
 @JsonCodec
 case class DMACParams(market: String, smaShort: Int, smaLong: Int, stopLoss: Double = 0.97d, takeProfit: Double = 1.02d, reportTargetAsset: String = "usd") extends StrategyParams
 
-class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
+class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin /*with OrderManagement*/ {
   override def decodeParams(paramsStr: String): Try[DMACParams] = decode[DMACParams](paramsStr).toTry
 
   override def title = "Dual Moving Average Crossover"
@@ -41,6 +42,7 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
 
   var isLong = false
   var enteredAt: Double = -1d
+
 
   lazy val stopLoss = params.stopLoss
   lazy val takeProfit = params.takeProfit
@@ -114,7 +116,7 @@ class DMACStrategy extends Strategy[DMACParams] with TimeSeriesMixin {
     if (hasCrossedUp && !isLong && balance.amount > 0.0) {
       isLong = true
       enteredAt = price
-      val amount = 1 * (balance.amount / price) * portfolio.getLeverage(market)
+      val amount = balance.as(market.baseAccount).amount * portfolio.getLeverage(market)
       println(s"BUY: ${amount}")
       ctx.submit(new MarketOrder(market, amount))
       recordTimeSeries("entry_exit", data.micros, 1)
