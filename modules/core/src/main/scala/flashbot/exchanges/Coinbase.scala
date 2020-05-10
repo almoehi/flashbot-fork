@@ -20,29 +20,37 @@ class Coinbase(implicit val system: ActorSystem,
     new ExchangeParams(
       // Base params
       new InstrumentParams(){{
-        makerFee = .0000
-        takerFee = .0000
+        makerFee = .5 * (1/100)
+        takerFee = .5 * (1/100)
       }},
+
+      // TODO: add min. trade amount !
 
       // Instrument specific
       new java.util.HashMap[String, InstrumentParams](){{
         put("btc_usd", new InstrumentParams(){{
           tickSize = 0.01
+          minOrderSize = 0.001 // BTC
         }})
         put("eth_usd", new InstrumentParams(){{
           tickSize = 0.01
+          minOrderSize = 0.1 // ETH
         }})
         put("btc_eur", new InstrumentParams(){{
           tickSize = 0.01
+          minOrderSize = 25 //min. 25 EUR
         }})
         put("eth_eur", new InstrumentParams(){{
           tickSize = 0.01
+          minOrderSize = 25
         }})
         put("eth_btc", new InstrumentParams(){{
           tickSize = 0.01
+          minOrderSize = 0.001
         }})
         put("ltc_eur", new InstrumentParams(){{
           tickSize = 0.01
+          minOrderSize = 0.1 // LTC
         }})
       }})
   }
