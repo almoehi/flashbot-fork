@@ -28,14 +28,15 @@ class DataServerSpec extends WordSpecLike with Matchers with Eventually {
 
 
   val exchange = "coinbase"
+  val configName = "test" //use test.conf
 
   "DataServer" should {
 
     "ingest and serve trades" in {
-      implicit val config = FlashbotConfig.loadStandalone().copy(
+      implicit val config = FlashbotConfig.loadStandalone(configName).copy(
         ingest = IngestConfig(
           enabled = Seq(s"$exchange/btc_usd/trades"),
-          backfill = Seq(s"$exchange/btc_usd/trades"),
+          backfill = Seq(Seq(s"$exchange/btc_usd/trades")),
           retention = Seq(Seq("*/*/trades", "10h"))
         )
       )
@@ -45,6 +46,8 @@ class DataServerSpec extends WordSpecLike with Matchers with Eventually {
       implicit val timeout = Timeout(10 seconds)
       implicit val mat = ActorMaterializer()
       implicit val ec = system.dispatcher
+
+      println(s"DB setup: ${config.db}")
 
       // Create data server actor.
       val dataserver = system.actorOf(Props(new DataServer(config.db,
@@ -82,7 +85,7 @@ class DataServerSpec extends WordSpecLike with Matchers with Eventually {
 
 /*
     "ingest and serve ladders" in {
-      implicit val config = FlashbotConfig.load()
+      implicit val config = FlashbotConfig.load(configName)
       implicit val system = ActorSystem(config.systemName, config.conf)
 
       implicit val timeout = Timeout(1 minute)
@@ -131,10 +134,10 @@ class DataServerSpec extends WordSpecLike with Matchers with Eventually {
       import TestBackfillDataSource._
 
       implicit val timeout = Timeout(1 minute)
-      implicit val _config = FlashbotConfig.loadStandalone().copy(
+      implicit val _config = FlashbotConfig.loadStandalone(configName).copy(
         ingest = IngestConfig(
           enabled = Seq(s"$exchange/btc_usd/trades"),
-          backfill = Seq(s"$exchange/btc_usd/trades"),
+          backfill = Seq(Seq(s"$exchange/btc_usd/trades")),
           retention = Seq(Seq("*/*/trades", "10h"))
         )
       )

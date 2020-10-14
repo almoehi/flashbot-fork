@@ -48,7 +48,7 @@ class LookAheadCandleStrategy extends Strategy[LookaheadParams]
   override def decodeParams(paramsStr: String) = decode[LookaheadParams](paramsStr).toTry
 
   // Source the data from the strategy itself.
-  val path1 = DataPath("bitfinex", "eth_usd", CandlesType(5 seconds))
+  val path1 = DataPath("coinbase", "eth_eur", CandlesType(5 seconds))
   def dataSeqs(tr: TimeRange)(implicit mat: Materializer): Map[DataPath[Candle], Seq[MarketData[Candle]]] = Map(
     path1 -> Await.result(
       PriceTap.akkaStream(100.0, .2, .6, tr, timeStep = 1 minute).zipWithIndex.map {
@@ -72,7 +72,7 @@ class LookAheadCandleStrategy extends Strategy[LookaheadParams]
     * confidences of the lookahead prediction.
     */
   override def initialize(portfolio: Portfolio, loader: EngineLoader) = {
-    Future.successful(Seq("bitfinex/eth_usd/candles_5s"))
+    Future.successful(Seq("coinbase/eth_eur/candles_5s"))
   }
 
   var prediction: Option[Double] = None

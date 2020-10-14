@@ -6,6 +6,7 @@ import akka.stream.scaladsl.Source
 import flashbot.core.MarketData.BaseMarketData
 import flashbot.core.{EngineLoader, _}
 import flashbot.models.{Candle, DataOverride, DataSelection, Portfolio}
+import io.circe.generic.JsonCodec
 import io.circe.generic.auto._
 import io.circe.parser._
 
@@ -13,7 +14,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-
+@JsonCodec
 case class CandleScannerParams(reportTargetAsset: String = "usd") extends StrategyParams
 
 class CandleScanner extends Strategy[CandleScannerParams] {
@@ -23,7 +24,7 @@ class CandleScanner extends Strategy[CandleScannerParams] {
   override def title = "Candle Scanner"
 
   override def initialize(portfolio: Portfolio, loader: EngineLoader) = {
-    Future.successful(Seq("bitfinex/btc_usd/candles_1d"))
+    Future.successful(Seq("coinbase/eth_eur/candles_1d"))
   }
 
   override def onData(data: MarketData[_]) = {

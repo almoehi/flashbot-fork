@@ -4,7 +4,7 @@ import flashbot.models.Ladder
 import flashbot.util.TableUtil
 import org.scalatest.{FlatSpec, Matchers}
 
-class LadderTest extends FlatSpec with Matchers {
+class LadderSpec extends FlatSpec with Matchers {
   "Ladder" should "load asks and bids" in {
     val ladder = new Ladder(depth = 25, .5)
     ladder.qtyAtPrice(99) shouldEqual 0

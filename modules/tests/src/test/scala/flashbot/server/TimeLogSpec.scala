@@ -65,16 +65,16 @@ class TimeLogSpec extends FlatSpec with Matchers {
 
     // Enqueue first 30, there should be no deletions yet.
     first30.foreach(tl.save(_))
-    // firstTrade shouldEqual first30.head
+    firstTrade shouldEqual first30.head
 
     // Enqueue next 30, still no deletions.
     next30.foreach(tl.save(_))
-    // firstTrade shouldEqual first30.head
+    firstTrade shouldEqual first30.head
 
     // Enqueue another 30, should delete first file.
     after60.take(30).foreach(tl.save(_))
-    // (firstTrade.micros > first30.head.micros) shouldBe true
-    // (firstTrade.micros < next30.head.micros) shouldBe true
+    (firstTrade.micros > first30.head.micros) shouldBe true
+    (firstTrade.micros < next30.head.micros) shouldBe true
   }
 
   "TimeLog" should "find an element with binary search" in {

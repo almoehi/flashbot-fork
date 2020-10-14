@@ -19,7 +19,7 @@ import scala.language.postfixOps
 class BitMEXMarketDataSourceSpec extends FlatSpec with Matchers {
 
   "BitMEXMarketDataSource" should "ingest order books depths" in {
-    implicit val config: FlashbotConfig = FlashbotConfig.load()
+    implicit val config: FlashbotConfig = FlashbotConfig.loadStandalone("test")
     implicit val system: ActorSystem = ActorSystem(config.systemName, config.conf)
     implicit val mat: ActorMaterializer = buildMaterializer()
     implicit val ec: ExecutionContextExecutor = system.dispatcher

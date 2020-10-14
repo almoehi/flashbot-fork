@@ -10,17 +10,12 @@ import org.scalatest.{FlatSpec, Matchers}
 import flashbot.core.PriceTap
 import flashbot.util.time._
 import flashbot.util.timeseries
-import flashbot.util.timeseries.{Scannable, TimeSeriesLike}
-import flashbot.util.timeseries.Scannable.BaseScannable.ScannableInto
 import org.ta4j.core.Bar
-import pprint._
-
-import scala.collection.AbstractIterator
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-class PriceTapTest extends FlatSpec with Matchers {
+class PriceTapSpec extends FlatSpec with Matchers {
 
   "PriceTap" should "emit times" in {
     implicit val system = ActorSystem("test")

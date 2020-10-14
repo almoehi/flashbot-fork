@@ -1,8 +1,8 @@
 package flashbot.core
 
-import org.scalatest.{FlatSpec, FunSpec, FunSuite, Matchers}
+import org.scalatest.{FlatSpec, Matchers}
 
-class ArithmeticBenchmark extends FlatSpec with Matchers {
+class ArithmeticBenchmarkSpec extends FlatSpec with Matchers {
 
   "Long" should "should be faster than double" in {
     var a: Long = 1

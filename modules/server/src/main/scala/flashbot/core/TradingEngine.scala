@@ -239,12 +239,12 @@ class TradingEngine(engineId: String,
               (Done, Seq(BotEnabled(id), sessionStartedEvent)))
               .recoverWith{
                 case t:Throwable =>
-                  log.error(t, s"startBot failed id=$id")
+                  log.error(t, s"startBot future failed id=$id")
                   Future.failed(t)
               }
           } catch {
             case t:Throwable =>
-              log.error(t, s"startBot failed id=$id")
+              log.error(t, s"startBot failed directly id=$id")
               Future.failed(t)
           }
       }
@@ -341,10 +341,8 @@ class TradingEngine(engineId: String,
         */
       case SubscribeToReport(botId) =>
         val fut1 = for {
-          bot <- state.bots.get(botId).toFut(
-            new IllegalArgumentException(s"Unknown bot $botId"))
-          session <- bot.sessions.lastOption.toFut(
-            new IllegalStateException(s"Bot $botId not started"))
+          bot <- state.bots.get(botId).toFut(new IllegalArgumentException(s"Unknown bot $botId"))
+          session <- bot.sessions.lastOption.toFut(new IllegalStateException(s"Bot $botId not started"))
           (ref, src) = Source
             .actorRef[Report](Int.MaxValue, OverflowStrategy.fail)
             .preMaterialize()
@@ -683,6 +681,11 @@ class TradingEngine(engineId: String,
         val initialAssets = debox.Map.fromIterable(initial_assets.map(kv => Account.parse(kv._1) -> kv._2))
         val initialPositions = debox.Map.fromIterable(initial_positions.map(kv => Market.parse(kv._1) -> kv._2))
 
+        val maybeTargetAsset: Option[String] = (for {
+          reportTargetAsset <- params.hcursor.downField("reportTargetAsset").as[Option[String]]
+          //portfolioTargetAsset <- params.hcursor.downField("portfolioTargetAsset").as[Option[String]]
+        } yield reportTargetAsset).toTry.getOrElse(Some("usd"))
+
         // Build our PortfolioRef. Paper trading bots have an isolated portfolio while live bots
         // share the global one.
         val portfolioRef = mode match {
@@ -692,7 +695,7 @@ class TradingEngine(engineId: String,
             // Otherwise, use the initial_assets and initial_positions from the bot config.
             val initialSessionPortfolio =
               state.bots.get(name).flatMap(_.sessions.lastOption.map(_.report.portfolio))
-                .getOrElse(new Portfolio(initialAssets, initialPositions, debox.Map.empty, params.hcursor.get[String]("reportTargetAsset").getOrElse("usd")))
+                .getOrElse(new Portfolio(initialAssets, initialPositions, debox.Map.empty, maybeTargetAsset.getOrElse("usd")))
             new PortfolioRef.Isolated(initialSessionPortfolio.toString)
 
           case Live =>
@@ -701,15 +704,17 @@ class TradingEngine(engineId: String,
             // change portfolio's defaultTargetAsset according to what's been set in strategy's params json
             // the params json contains the strategy params, which need to implement StrategyParams trait providing the "reportTargetAsset" property
             new PortfolioRef {
-              override def getPortfolio(instruments: Option[InstrumentIndex]): Portfolio = globalPortfolio.get.withDefaultTargetAsset(params.hcursor.get[String]("reportTargetAsset").getOrElse("usd"))
+              override def getPortfolio(instruments: Option[InstrumentIndex]): Portfolio = globalPortfolio.get.withDefaultTargetAsset(maybeTargetAsset.getOrElse("usd"))
 
               override def printPortfolio: String = globalPortfolio.get.toString //withDefaultTargetAsset(params.hcursor.get[String]("reportTargetAsset").getOrElse("usd")).toString
 
               override def acquirePortfolio(ctx: TradingSession): Portfolio = globalPortfolio.take()
 
-              override def releasePortfolio(portfolio: Portfolio): Unit = globalPortfolio.put(portfolio.withDefaultTargetAsset(params.hcursor.get[String]("reportTargetAsset").getOrElse("usd")))
+              override def releasePortfolio(portfolio: Portfolio): Unit = globalPortfolio.put(portfolio.withDefaultTargetAsset(maybeTargetAsset.getOrElse("usd")))
             }
         }
+
+        log.info(s"Starting bot $name with portfolio: ${portfolioRef.printPortfolio}")
 
         // Create an actor that processes ReportEvents from this session.
         val (ref, fut) = Source

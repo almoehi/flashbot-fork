@@ -6,7 +6,7 @@ import org.scalatest.{FlatSpec, Matchers}
 import io.circe.syntax._
 import io.circe.parser._
 
-class OrderBookTest extends FlatSpec with Matchers {
+class OrderBookSpec extends FlatSpec with Matchers {
   "OrderBook" should "encode to JSON" in {
     val book = new OrderBook(.01)
       .open("1", 2.3, 3.3, Buy)
@@ -16,8 +16,6 @@ class OrderBookTest extends FlatSpec with Matchers {
     val fmt = bookType.fmtJson[OrderBook]
     val bookJson = fmt.modelEn(book)
     val decoded = bookJson.as[OrderBook](fmt.modelDe).right.get
-    println(book)
-    println(decoded)
     decoded shouldEqual book
   }
 }

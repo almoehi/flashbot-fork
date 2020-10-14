@@ -24,7 +24,7 @@ class TradeWriter extends Strategy[Params] {
   def title = "Trade Writer"
 
   def initialize(portfolio: Portfolio, loader: EngineLoader) =
-    Future.successful(Seq("bitfinex/btc_usd/trades"))
+    Future.successful(Seq("coinbase/eth_eur/trades"))
 
   override def onData(data: MarketData[_]): Unit = data.data match {
     case trade: Trade =>
@@ -46,10 +46,4 @@ class TradeWriter extends Strategy[Params] {
 object TradeWriter {
   @JsonCodec
   case class Params(trades: Seq[Trade], reportTargetAsset: String = "usd") extends StrategyParams
-  /*
-  object Params {
-    implicit def de: Decoder[Params] = deriveDecoder[Params]
-    implicit def en: Encoder[Params] = deriveEncoder[Params]
-  }
-   */
 }
