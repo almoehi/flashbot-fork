@@ -154,7 +154,7 @@ class JPriceIndex(val conversions: Conversions) extends PriceIndex {
     ret
   }
 
-  def get(symbol: String): Double = {
+  def get(symbol: String): Option[Double] = {
     val matches = symbolsToMarkets.get(symbol)
     if (matches != null) {
       if (matches.size() == 1) {
@@ -164,13 +164,14 @@ class JPriceIndex(val conversions: Conversions) extends PriceIndex {
         throw new RuntimeException(s"Ambiguous symbol. Found more than one price for $symbol.")
       }
     }
-    java.lang.Double.NaN
+    //java.lang.Double.NaN
+    None
   }
 
-  def get(market: Market): Double = {
+  def get(market: Market): Option[Double] = {
     val fp = priceMap.get(market)
-    if (fp != null) fp.price
-    else java.lang.Double.NaN
+    if (fp != null) Some(fp.price)
+    else None
   }
 
   protected[flashbot] def setPrice(market: Market, price: Double)
@@ -370,19 +371,7 @@ class JPriceIndex(val conversions: Conversions) extends PriceIndex {
     }
   }
 
-  override def getOpt(symbol: String): Option[Double] = {
-    val ret: Double = get(symbol)
-    if (java.lang.Double.isNaN(ret)) None
-    else Some(ret)
-  }
+  override def apply(symbol: String): Double = get(symbol).get
 
-  override def getOpt(market: Market): Option[Double] = {
-    val ret: Double = get(market)
-    if (java.lang.Double.isNaN(ret)) None
-    else Some(ret)
-  }
-
-  override def apply(symbol: String): Double = getOpt(symbol).get
-
-  override def apply(market: Market): Double = getOpt(market).get
+  override def apply(market: Market): Double = get(market).get
 }
