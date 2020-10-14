@@ -124,7 +124,18 @@ class Report(val strategy: String,
     rv.value = fmt.update(rv.value, dv)
   }
 
-  def getval[T](key: String): ReportValue[T] = values.get(key).asInstanceOf[ReportValue[T]]
+  def getval[T](key: String): ReportValue[T] = {
+    try {
+      values.get(key).asInstanceOf[ReportValue[T]]
+    } catch {
+      case e:ClassCastException =>
+        values.get(key).asInstanceOf[Option[ReportValue[T]]].get
+      case e:Throwable =>
+        println(s"Failed to access: $key => ${values.get(key)}")
+        e.printStackTrace()
+        throw e
+    }
+  }
 }
 
 object Report {
@@ -198,20 +209,28 @@ object Report {
   def empty(strategyName: String,
             params: Json,
             barSize: Option[FiniteDuration] = None,
-            reportTargetAsset: Option[String] = None): Report = new Report(
-    strategyName,
-    params,
-    barSize.getOrElse(1 hour),
-    Portfolio.empty(reportTargetAsset.orElse(params.hcursor.get[String]("reportTargetAsset").toOption).getOrElse("usd")),
-    reportTargetAsset.orElse(params.hcursor.get[String]("reportTargetAsset").toOption).getOrElse("usd"),
-    debox.Buffer.empty,
-    debox.Map.empty,
-    debox.Map.empty,
-    debox.Map.empty,
-    isComplete = false,
-    None,
-    MutableOpt.from(None)
-  )
+            reportTargetAsset: Option[String] = None): Report = {
+
+    val maybeTarget: Option[String] = (for {
+      reportTargetAsset <- params.hcursor.downField("reportTargetAsset").as[Option[String]]
+      //portfolioTargetAsset <- params.hcursor.downField("portfolioTargetAsset").as[Option[String]]
+    } yield reportTargetAsset).toTry.getOrElse(Some("usd"))
+
+    new Report(
+      strategyName,
+      params,
+      barSize.getOrElse(1 hour),
+      Portfolio.empty(reportTargetAsset.orElse(maybeTarget).getOrElse("usd")),
+      maybeTarget.getOrElse("usd"),
+      debox.Buffer.empty,
+      debox.Map.empty,
+      debox.Map.empty,
+      debox.Map.empty,
+      isComplete = false,
+      None,
+      MutableOpt.from(None)
+    )
+  }
 
   implicit val reportFmt: DeltaFmtJson[Report] =
     DeltaFmt.updateEventFmtJson[Report, ReportEvent]("report")
