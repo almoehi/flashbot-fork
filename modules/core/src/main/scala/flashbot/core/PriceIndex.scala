@@ -27,15 +27,11 @@ trait PriceIndex {
   protected[flashbot] def setPrice(market: Market, price: Double)
                                   (implicit instruments: InstrumentIndex): Unit
 
-//  def get(symbol: String): Num
-//  def get(market: Market): Num
-
   def apply(symbol: String): Double
   def apply(market: Market): Double
 
-  // TODO: Rename these to `get`
-  def getOpt(symbol: String): Option[Double]
-  def getOpt(market: Market): Option[Double]
+  def get(symbol: String): Option[Double]
+  def get(market: Market): Option[Double]
 
   def pegs: Pegs
 
