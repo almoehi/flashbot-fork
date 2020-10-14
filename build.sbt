@@ -491,6 +491,7 @@ lazy val tests = flashbotModule("tests", previousFBVersion)
   .dependsOn(core, server, testing)
   .aggregate(core, server, testing)
 
+testOptions in tests += Tests.Argument("-oF")
 //lazy val tests = testsBase.jvm.dependsOn(server, client)
 //lazy val testsJS = testsBase.js.dependsOn(scalajs)
 
