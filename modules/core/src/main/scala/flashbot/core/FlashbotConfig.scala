@@ -118,9 +118,9 @@ object FlashbotConfig {
     val apps = ConfigFactory.parseResources(s"$appName.conf")
     val refs = ConfigFactory.parseResources("reference.conf")
 
-    var fbAkkaConf = refs.getConfig(key).withOnlyPath("akka")
-    if (!standalone) {
-      fbAkkaConf = refs.getConfig(s"$key.akka-cluster").atKey("akka").withFallback(fbAkkaConf)
+    val fbAkkaConf = standalone match {
+      case true => refs.getConfig(key).withOnlyPath("akka")
+      case false => refs.getConfig(s"$key.akka-cluster").atKey("akka").withFallback(fbAkkaConf)
     }
 
     var conf = overrides
